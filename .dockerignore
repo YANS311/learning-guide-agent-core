@@ -11,3 +11,5 @@ data
 faiss_index
 output
 traces
+java/target
+go/coverage.out

@@ -23,3 +23,10 @@ traces/
 *.egg-info/
 build/
 dist/
+# Java / Go build artifacts
+target/
+*.class
+*.jar
+*.exe
+*.test
+coverage.out
