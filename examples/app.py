@@ -10,9 +10,10 @@ from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from engines import AgentDispatcher, AgentResult, BaseAgent, ToolRegistry
 from engines.agent_trace import TraceCollector, TraceRecord, ToolCallRecord
@@ -74,6 +75,20 @@ def create_app(llm_client=None) -> FastAPI:
     traces = TraceCollector(max_records=100)
     app.state.dispatcher = dispatcher
     app.state.traces = traces
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": str(exc.detail), "detail": str(exc.detail), "path": request.url.path},
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        return JSONResponse(
+            status_code=500,
+            content={"error": "内部服务异常", "path": request.url.path},
+        )
 
     async def answer(message: str) -> AgentResult:
         start = time.perf_counter()

@@ -92,3 +92,14 @@ def test_trace_records_are_bounded():
         collector.record(TraceRecord(str(index), "", "LEARNING", 1.0, "demo"))
     assert [record.request_id for record in collector.records] == ["1", "2"]
     assert collector.get_stats()["total_requests"] == 2
+
+
+def test_http_errors_always_return_valid_json():
+    client = TestClient(create_app())
+    response = client.get("/api/nonexistent-endpoint")
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+    body = response.json()
+    assert body["path"] == "/api/nonexistent-endpoint"
+    assert "error" in body
+
