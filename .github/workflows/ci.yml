@@ -31,7 +31,7 @@ jobs:
           assert not bad_files, f'Forbidden binary/document files found: {bad_files}'
           "
       - name: Run pytest
-        run: pytest -v
+        run: python -m pytest -v
 
   go:
     name: Go Implementation Tests

@@ -3,10 +3,10 @@ name: Graph Ops CI
 on:
   push:
     branches: [main, master, "feature/go-graph-ops-phase1"]
-    paths: ["services/graph-ops-go/**", ".github/workflows/graph-ops.yml"]
+    paths: ["services/graph-ops-go/**", ".github/workflows/graph-ops.yml", ".github/workflows/ci.yml"]
   pull_request:
     branches: [main, master]
-    paths: ["services/graph-ops-go/**", ".github/workflows/graph-ops.yml"]
+    paths: ["services/graph-ops-go/**", ".github/workflows/graph-ops.yml", ".github/workflows/ci.yml"]
 
 permissions:
   contents: read
