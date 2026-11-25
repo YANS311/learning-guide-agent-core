@@ -1,0 +1,4 @@
+kind,id,name,category,semester,credits,hours,layer,description,type,source,target,reason,strength
+course,X01,Sample A,,,2,30,,,,,,,
+course,X02,Sample B,,,3,45,,,,,,,
+relation,,,,,,,,,PREREQ,X01,X02,Synthetic example,strong

@@ -1,0 +1,52 @@
+name: Graph Ops CI
+
+on:
+  push:
+    branches: [main, master, "feature/go-graph-ops-phase1"]
+    paths: ["services/graph-ops-go/**", ".github/workflows/graph-ops.yml"]
+  pull_request:
+    branches: [main, master]
+    paths: ["services/graph-ops-go/**", ".github/workflows/graph-ops.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  go-graph-ops:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/graph-ops-go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Check Go format
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Tests
+        run: go test -cover ./...
+      - name: Race detector
+        run: go test -race ./...
+      - name: Build and verify Python-to-Go HTTP contract
+        run: |
+          go build -o "$RUNNER_TEMP/graph-ops" ./cmd/server
+          python tests/contract.py "$RUNNER_TEMP/graph-ops"
+      - name: Scan service source and fixtures for secrets
+        run: |
+          dir="$(mktemp -d)"
+          version=8.30.1
+          release="https://github.com/gitleaks/gitleaks/releases/download/v$version"
+          asset="gitleaks_${version}_linux_x64.tar.gz"
+          cd "$dir"
+          curl -fsSLO "$release/$asset"
+          curl -fsSLO "$release/gitleaks_${version}_checksums.txt"
+          grep -F " $asset" "gitleaks_${version}_checksums.txt" | sha256sum -c --strict
+          tar -xzf "$asset" gitleaks
+          ./gitleaks dir --redact=100 --no-banner "$GITHUB_WORKSPACE/services/graph-ops-go"

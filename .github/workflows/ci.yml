@@ -2,9 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feature/go-graph-ops-phase1"]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   python:
@@ -17,7 +20,7 @@ jobs:
           python-version: "3.10"
           cache: "pip"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
       - name: Verify zero institutional or private artifacts
         run: |
           python -c "

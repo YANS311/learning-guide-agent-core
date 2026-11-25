@@ -1,0 +1,11 @@
+{
+  "current": {
+    "courses": [{"id": "X01", "name": "Sample A", "credits": 1, "hours": 30}],
+    "relations": []
+  },
+  "target": {
+    "courses": [{"id": "X01", "name": "Sample A", "credits": 2, "hours": 30},
+                {"id": "X02", "name": "Sample B", "credits": 3, "hours": 45}],
+    "relations": [{"type": "PREREQ", "source": "X01", "target": "X02", "reason": "Synthetic example"}]
+  }
+}
