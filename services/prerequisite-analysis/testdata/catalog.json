@@ -1,0 +1,23 @@
+{
+  "courses": [
+    {"id":"C101","name":"数学基础","semester":"第1学期","credits":4},
+    {"id":"C102","name":"程序设计基础","semester":"第1学期","credits":3},
+    {"id":"C201","name":"电路与信号","semester":"第2学期","credits":3},
+    {"id":"C202","name":"数据处理方法","semester":"第2学期","credits":3},
+    {"id":"C301","name":"数字信号处理","semester":"第3学期","credits":4},
+    {"id":"C302","name":"嵌入式应用","semester":"第3学期","credits":3},
+    {"id":"C401","name":"信号系统综合设计","semester":"第4学期","credits":4},
+    {"id":"C490","name":"工程沟通","semester":"第4学期","credits":2}
+  ],
+  "relations": [
+    {"source":"C101","target":"C201"},
+    {"source":"C101","target":"C202"},
+    {"source":"C102","target":"C202"},
+    {"source":"C102","target":"C302"},
+    {"source":"C201","target":"C301"},
+    {"source":"C202","target":"C301"},
+    {"source":"C202","target":"C302","strength":"weak","reason":"适合作为实践准备"},
+    {"source":"C301","target":"C401"},
+    {"source":"C302","target":"C401"}
+  ]
+}

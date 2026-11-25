@@ -1,0 +1,64 @@
+name: Prerequisite Analysis
+
+on:
+  push:
+    branches: ["feature/prerequisite-analysis-phase4"]
+  pull_request:
+    branches: [main]
+    paths:
+      - "services/prerequisite-analysis/**"
+      - ".github/workflows/prerequisite-analysis.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  api-and-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/prerequisite-analysis
+    env:
+      PYTHONPATH: "."
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install test dependencies
+        run: |
+          pip install -r requirements-dev.txt
+          npm install --prefix "$RUNNER_TEMP/p4-browser" playwright@1.65.1
+          "$RUNNER_TEMP/p4-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Unit and API contracts
+        run: python -m pytest -q -p no:cacheprovider
+      - name: Isolated Neo4j and Chromium workflows
+        env:
+          PREREQ_LAB_BOLT: "bolt://127.0.0.1:27694"
+        run: |
+          set -euo pipefail
+          export PREREQ_LAB_MARKER="$(openssl rand -hex 32)"
+          echo "::add-mask::$PREREQ_LAB_MARKER"
+          export NODE_PATH="$RUNNER_TEMP/p4-browser/node_modules"
+          docker run --rm -d --name prereq-phase4-db \
+            -p 127.0.0.1:27694:7687 -e NEO4J_AUTH=none \
+            -e NEO4J_initial_dbms_default__database=prereq-phase4-test \
+            -e NEO4J_server_memory_heap_initial__size=256m \
+            -e NEO4J_server_memory_heap_max__size=512m \
+            -e NEO4J_server_memory_pagecache_size=192m neo4j:5.26.18-community
+          trap 'docker stop prereq-phase4-db >/dev/null' EXIT
+          for attempt in $(seq 1 40); do
+            if docker exec prereq-phase4-db cypher-shell -d prereq-phase4-test 'RETURN 1' >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          docker exec prereq-phase4-db cypher-shell -d prereq-phase4-test 'RETURN 1'
+          python tests/bootstrap_lab.py
+          python -m pytest -q -p no:cacheprovider
+          node tests/browser.cjs python

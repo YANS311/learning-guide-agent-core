@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>课程先修关系图谱分析系统</title>
+<link rel="stylesheet" href="/app.css">
+<script defer src="/app.js"></script>
+</head>
+<body>
+<header class="top"><strong>课程先修关系图谱分析系统</strong><span id="version" role="status">读取图谱</span></header>
+<div class="layout">
+  <aside class="sidebar">
+    <form id="search"><label for="keyword">检索课程</label><div class="search-row"><input id="keyword" placeholder="课程名称或编号" maxlength="100"><button type="submit">检索</button></div></form>
+    <p id="search-count" aria-live="polite"></p>
+    <div id="catalog" class="catalog" aria-label="课程列表"></div>
+  </aside>
+  <main>
+    <nav class="tabs" aria-label="分析视图">
+      <button data-mode="graph" aria-current="page">先修图谱</button><button data-mode="order">学习顺序</button><button data-mode="compare">依赖比较</button><button data-mode="missing">缺失先修</button><button data-mode="impact">依赖影响</button>
+    </nav>
+    <div class="heading">
+      <div><h1 id="title">先修图谱</h1><p id="active-course"></p></div>
+      <label for="policy">关系范围 <select id="policy"><option value="all">全部先修</option><option value="required">仅必需先修</option></select></label>
+    </div>
+    <form id="compare-form" class="control" hidden><label for="other">对比课程</label><select id="other" required></select><button class="primary">开始比较</button></form>
+    <form id="missing-form" class="control" hidden>
+      <fieldset><legend>已修课程</legend><div id="completed" class="checks"></div></fieldset><button class="primary">分析缺失项</button>
+    </form>
+    <p id="message" role="status"></p>
+    <div id="result"></div>
+  </main>
+</div>
+</body>
+</html>

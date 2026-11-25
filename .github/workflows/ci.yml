@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "feature/go-graph-ops-phase1", "feature/go-graph-ops-phase2", "feature/go-graph-ops-phase3"]
+    branches: [main, "feature/go-graph-ops-phase1", "feature/go-graph-ops-phase2", "feature/go-graph-ops-phase3", "feature/prerequisite-analysis-phase4"]
   pull_request:
     branches: [main]
 
@@ -31,7 +31,7 @@ jobs:
           assert not bad_files, f'Forbidden binary/document files found: {bad_files}'
           "
       - name: Run pytest
-        run: python -m pytest -v
+        run: python -m pytest -v tests
 
   go:
     name: Go Implementation Tests

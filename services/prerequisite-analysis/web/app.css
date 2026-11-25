@@ -1,0 +1,53 @@
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+:root{font:15px/1.5 system-ui,"Microsoft YaHei UI","PingFang SC",sans-serif;color:#172c34;background:#f6f8fa}
+body{margin:0}
+button,input,select{font:inherit}
+button,input,select{border:1px solid #cbd8df;border-radius:5px;background:white;color:#18323b;padding:7px 11px}
+button{cursor:pointer}
+button:hover{border-color:#23857b}
+:focus-visible{outline:2px solid #087a69;outline-offset:2px}
+.primary{background:#066862;color:white;border-color:#066862}
+.top{height:auto;min-height:62px;background:#fff;border-bottom:1px solid #dbe4e8;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 22px}
+.top strong{font-size:18px}
+.top span{color:#506971;font-size:13px;overflow-wrap:anywhere}
+.layout{display:grid;grid-template-columns:238px minmax(0,1fr);min-height:calc(100vh - 62px)}
+.sidebar{padding:18px 14px;border-right:1px solid #dbe4e8;background:#f0f4f5;min-width:0}
+.sidebar label,.control label{font-weight:650}
+.search-row{display:flex;gap:5px;margin:6px 0}
+.search-row input{width:100%;min-width:0}
+.search-row button{flex:none}
+#search-count{font-size:13px;color:#4b666f;margin:8px 0}
+.catalog{display:grid;gap:4px;max-height:74vh;overflow:auto}
+.catalog button{display:flex;gap:3px;flex-direction:column;text-align:left;min-width:0;overflow-wrap:anywhere;background:transparent;border-color:transparent}
+.catalog button[aria-pressed=true]{background:#e1f0ec;border-color:#9acac0;color:#064f47}
+.catalog small{color:#4b636b}
+main{max-width:1440px;width:100%;min-width:0;padding:15px 24px 24px}
+.tabs{border-bottom:1px solid #cddae1;display:flex;flex-wrap:wrap;gap:4px}
+.tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;background:transparent;padding:9px 12px}
+.tabs button[aria-current]{color:#075e55;border-bottom-color:#157b70;font-weight:700}
+.heading{display:flex;align-items:start;justify-content:space-between;gap:8px;flex-wrap:wrap;margin:18px 0 12px}
+h1,h2,p{margin:0}
+h1{font-size:26px;line-height:1.25}
+h2{font-size:16px;margin:12px 0 6px}
+.heading p{color:#4b666f;margin-top:4px}
+#message{min-height:21px;color:#4b666f}
+#message.error{color:#a22236}
+.control{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0}
+fieldset{min-width:0;border:1px solid #cbd8df;border-radius:5px}
+.checks{display:flex;gap:7px 14px;flex-wrap:wrap}
+.checks label{font-weight:500}
+.graph-scroll,.summary,.table-scroll{border:1px solid #d9e4e9;border-radius:6px;background:#fff;overflow:auto}
+.graph-scroll{min-height:270px;max-height:550px}
+.graph-scroll svg{display:block;color:#122e38}
+.graph-node{cursor:pointer}
+.graph-node:hover rect,.graph-node:focus rect{stroke:#087b67;stroke-width:3}
+.legend{font-size:13px;color:#415e68;margin:4px 0 10px}
+.summary{display:flex;gap:24px;flex-wrap:wrap;padding:10px 13px;margin-bottom:10px}
+.summary strong{font-size:21px}
+.summary span{color:#486570}
+table{width:100%;border-collapse:collapse;text-align:left}
+th,td{padding:8px 10px;border-bottom:1px solid #dfe8ec;vertical-align:top;overflow-wrap:anywhere}
+th{background:#edf4f4;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+@media (max-width:720px){.top{padding:10px 12px}.layout{grid-template-columns:minmax(0,1fr)}.sidebar{border-right:0;border-bottom:1px solid #dbe4e8}.catalog{max-height:150px;grid-template-columns:repeat(2,minmax(0,1fr))}main{padding:12px}.graph-scroll{max-height:390px}.tabs button{padding:7px}h1{font-size:22px}}
