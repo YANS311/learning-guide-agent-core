@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "feature/go-graph-ops-phase1", "feature/go-graph-ops-phase2"]
+    branches: [main, "feature/go-graph-ops-phase1", "feature/go-graph-ops-phase2", "feature/go-graph-ops-phase3"]
   pull_request:
     branches: [main]
 

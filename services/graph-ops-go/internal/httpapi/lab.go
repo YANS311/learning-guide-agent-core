@@ -17,9 +17,10 @@ const labPreview = "/api/v1/graph/db/preview"
 const labExecute = "/api/v1/graph/db/execute"
 const labOperation = "/api/v1/graph/db/operation"
 
-func NewWithLab(log *slog.Logger, timeout time.Duration, lab *neoops.Service) *API {
+func NewWithLab(log *slog.Logger, timeout time.Duration, lab *neoops.Service, auth *Auth) *API {
 	a := New(log, timeout)
 	a.lab = lab
+	a.auth = auth
 	return a
 }
 
@@ -27,6 +28,7 @@ type labMetrics struct {
 	ready                                                    bool
 	success, failure, conflicts, replays, rollbacks, unknown uint64
 	tx                                                       counter
+	versionConflicts                                         uint64
 }
 
 func (m labMetrics) render(out io.Writer) {
@@ -127,6 +129,11 @@ func (a *API) processLab(ctx context.Context, r *http.Request, route string, bod
 			if id != "" {
 				res.body.(map[string]any)["operation_id"] = id
 			}
+			outcome := attempt.Status
+			if outcome == "" {
+				outcome = "rejected"
+			}
+			res.body.(map[string]any)["outcome"] = outcome
 			return res
 		}
 		log.Info("sync_outcome", "operation_id", out.Operation.ID, "plan_id", out.Operation.PlanID, "status", out.Operation.Status, "replay", out.Replay)

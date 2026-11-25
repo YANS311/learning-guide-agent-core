@@ -23,9 +23,10 @@ const lifetime = 3 * time.Minute
 var operationKey = regexp.MustCompile(`^[a-zA-Z0-9_-]{16,128}$`)
 
 type Service struct {
-	repo *Repository
-	key  []byte
-	now  func() time.Time
+	repo         *Repository
+	key          []byte
+	now          func() time.Time
+	planLifetime time.Duration
 }
 
 func New(repo *Repository, key string) (*Service, error) {
@@ -33,7 +34,16 @@ func New(repo *Repository, key string) (*Service, error) {
 	if err != nil || strings.EqualFold(key, repo.marker) {
 		return nil, errors.New("lab plan signing key must be a separate 32-byte value")
 	}
-	return &Service{repo: repo, key: k, now: time.Now}, nil
+	return &Service{repo: repo, key: k, now: time.Now, planLifetime: lifetime}, nil
+}
+
+// SetPlanLifetime configures a shorter lab TTL before serving requests.
+func (s *Service) SetPlanLifetime(ttl time.Duration) error {
+	if ttl < time.Second || ttl > lifetime {
+		return errors.New("invalid lab plan lifetime")
+	}
+	s.planLifetime = ttl
+	return nil
 }
 
 func (s *Service) Ready(ctx context.Context) error { return s.repo.Ready(ctx) }
@@ -193,7 +203,7 @@ func (s *Service) Preview(ctx context.Context, in Target) (PreviewResult, error)
 			return nil, err
 		}
 		now := s.now().UTC()
-		c := claims{hex.EncodeToString(id), targetHash, snapshotHash, version, scope, now, now.Add(lifetime), counts{plan.Statistics.Courses, plan.Statistics.Relations}}
+		c := claims{hex.EncodeToString(id), targetHash, snapshotHash, version, scope, now, now.Add(s.planLifetime), counts{plan.Statistics.Courses, plan.Statistics.Relations}}
 		raw, err := json.Marshal(c)
 		if err != nil {
 			return nil, err
@@ -369,7 +379,11 @@ func (s *Service) Execute(ctx context.Context, in Command, key string) (out Exec
 		code.RolledBack = cleanup(tx.Rollback) == nil
 		return Execution{}, code
 	}
-	if err = tx.Commit(ctx); err != nil {
+	commit := tx.Commit
+	if s.repo.commitAck != nil {
+		commit = func(ctx context.Context) error { return s.repo.commitAck(ctx, tx) }
+	}
+	if err = commit(ctx); err != nil {
 		// A failed commit acknowledgement can follow a successful server-side commit.
 		return Execution{}, fail(503, "commit_outcome_unknown")
 	}

@@ -31,7 +31,8 @@ const (
 )
 
 var operations = map[string]string{live: "GET", ready: "GET", validate: "POST", preview: "POST", metrics: "GET",
-	labPreview: "POST", labExecute: "POST", labOperation: "GET"}
+	labPreview: "POST", labExecute: "POST", labOperation: "GET",
+	login: "POST", logout: "POST", adminImport: "POST", adminHistory: "GET", adminDetail: "GET", adminMonitoring: "GET"}
 
 type counter struct {
 	count   uint64
@@ -46,10 +47,12 @@ type API struct {
 	diff                counter
 	lab                 *neoops.Service
 	labMetrics          labMetrics
+	auth                *Auth
+	started             time.Time
 }
 
 func New(logger *slog.Logger, timeout time.Duration) *API {
-	return &API{logger: logger, timeout: timeout, requests: make(map[string]counter)}
+	return &API{logger: logger, timeout: timeout, requests: make(map[string]counter), started: time.Now().UTC()}
 }
 
 type response struct {
@@ -63,6 +66,9 @@ func failure(status int, code, location, message string) response {
 }
 
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if staticConsole(w, r) {
+		return
+	}
 	start := time.Now()
 	id := make([]byte, 16)
 	if _, err := rand.Read(id); err != nil {
@@ -86,7 +92,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	total.count++
 	total.seconds += time.Since(start).Seconds()
 	a.requests[route] = total
-	if route == validate && r.Method == "POST" {
+	if (route == validate || route == adminImport) && r.Method == "POST" {
 		if result.status == 200 {
 			a.validated++
 		} else {
@@ -96,11 +102,14 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if route == labExecute && r.Method == "POST" {
 		if result.status == 200 {
 			a.labMetrics.success++
-		} else {
+		} else if result.code != "commit_outcome_unknown" {
 			a.labMetrics.failure++
 		}
 		if result.status == 409 {
 			a.labMetrics.conflicts++
+		}
+		if result.code == "database_state_changed" {
+			a.labMetrics.versionConflicts++
 		}
 	}
 	a.mu.Unlock()
@@ -133,7 +142,23 @@ func (a *API) run(ctx context.Context, w http.ResponseWriter, r *http.Request, r
 	if ctx.Err() != nil {
 		return canceled(ctx.Err())
 	}
+	perm := permission(route)
+	if route == logout || (perm != 0 && !(route == metrics && a.auth == nil && a.lab == nil)) {
+		if status := a.auth.check(r, perm); status != 200 {
+			return authDenied(status)
+		}
+	}
 	switch route {
+	case logout:
+		a.auth.revoke(r)
+		return response{200, "", map[string]bool{"logged_out": true}}
+	case adminMonitoring:
+		return a.adminRead(ctx, r, route)
+	case adminHistory, adminDetail:
+		if a.lab == nil {
+			return failure(503, "lab_not_configured", "database", "lab database mode is disabled")
+		}
+		return a.adminRead(ctx, r, route)
 	case ready:
 		if a.lab != nil {
 			return a.labReady(ctx)
@@ -152,7 +177,7 @@ func (a *API) run(ctx context.Context, w http.ResponseWriter, r *http.Request, r
 		}
 	}
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || (media != "application/json" && !(route == validate && media == "text/csv")) {
+	if err != nil || (media != "application/json" && !((route == validate || route == adminImport) && media == "text/csv")) {
 		return failure(415, "unsupported_media_type", "content_type", "expected JSON or CSV on the validation endpoint")
 	}
 	reader := http.MaxBytesReader(w, r.Body, MaxBody)
@@ -181,6 +206,9 @@ func (a *API) run(ctx context.Context, w http.ResponseWriter, r *http.Request, r
 		return failure(400, "invalid_encoding", "body", "request body must be UTF-8")
 	}
 	log.Info("parse", "format", media)
+	if route == login {
+		return a.processLogin(r, body)
+	}
 	if route == labPreview || route == labExecute {
 		return a.processLab(ctx, r, route, body, log)
 	}
@@ -206,7 +234,7 @@ func (a *API) process(ctx context.Context, route, media string, body []byte, log
 		return failure(400, problem.Code, problem.Location, problem.Message)
 	}
 	log.Info("validate")
-	if route == validate {
+	if route == validate || route == adminImport {
 		if len(data.Courses) == 0 && len(data.Relations) == 0 {
 			return failure(422, "no_records", "data", "at least one record is required for import validation")
 		}
@@ -220,7 +248,11 @@ func (a *API) process(ctx context.Context, route, media string, body []byte, log
 		} else {
 			issues = []graph.Issue{}
 		}
-		return response{status, code, map[string]any{"valid": status == 200, "courses": len(data.Courses), "relations": len(data.Relations), "errors": issues}}
+		result := map[string]any{"valid": status == 200, "courses": len(data.Courses), "relations": len(data.Relations), "errors": issues}
+		if route == adminImport && status == 200 {
+			result["data"] = data
+		}
+		return response{status, code, result}
 	}
 	log.Info("diff")
 	start := time.Now()
@@ -250,7 +282,7 @@ func (a *API) metricText() string {
 	defer a.mu.Unlock()
 	var out bytes.Buffer
 	fmt.Fprintln(&out, "# TYPE graphops_http_requests_total counter")
-	routes := []string{live, ready, validate, preview, labPreview, labExecute, labOperation, metrics, "unknown"}
+	routes := []string{live, ready, validate, preview, labPreview, labExecute, labOperation, metrics, login, logout, adminImport, adminHistory, adminDetail, adminMonitoring, "unknown"}
 	for _, r := range routes {
 		fmt.Fprintf(&out, "graphops_http_requests_total{route=%q} %d\n", r, a.requests[r].count)
 	}

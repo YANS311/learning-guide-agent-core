@@ -1,5 +1,7 @@
 # Graph Ops
 
+The [Phase 3 console guide](CONSOLE.md) covers authentication, browser workflows, APIs and recovery.
+
 In the default mode, this loopback-only Go service validates an import and compares a supplied course/prerequisite snapshot with a target. Database writes are available only in the opt-in isolated Phase 2 lab. All fixtures are synthetic.
 
 ```sh
@@ -40,8 +42,8 @@ python tests/contract.py /tmp/graph-ops
 
 ## Phase 2 isolated Neo4j lab
 
-The original preview endpoint still accepts caller-provided snapshots. The lab endpoints
-are disabled unless all three environment variables are set: `GRAPHOPS_LAB_BOLT`,
+The original preview endpoint still accepts caller-provided snapshots. The Neo4j lab also
+requires `GRAPHOPS_ADMIN_TOKEN` in addition to `GRAPHOPS_LAB_BOLT`,
 `GRAPHOPS_LAB_MARKER`, and `GRAPHOPS_LAB_PLAN_KEY`. Use a fresh Neo4j Community
 5.26 instance with database `graphops-phase2-test`, no external writers and a
 non-default Bolt port bound to a loopback IP. The runtime does not create schema
@@ -87,6 +89,7 @@ docker exec graphops-phase2-lab cypher-shell -d graphops-phase2-test 'RETURN 1'
 export GRAPHOPS_LAB_BOLT=bolt://127.0.0.1:27687
 export GRAPHOPS_LAB_MARKER="$(openssl rand -hex 32)"
 export GRAPHOPS_LAB_PLAN_KEY="$(openssl rand -hex 32)"
+export GRAPHOPS_ADMIN_TOKEN="$(openssl rand -hex 32)"
 GRAPHOPS_INTEGRATION=1 go test -race -v -count=1 ./internal/neoops -run '^TestNeo4jIntegration$'
 go build -o /tmp/graph-ops ./cmd/server
 python tests/lab_contract.py /tmp/graph-ops

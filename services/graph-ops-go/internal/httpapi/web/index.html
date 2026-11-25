@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Graph Operations Console</title>
+<link rel="stylesheet" href="/console/style.css">
+<script defer src="/console/app.js"></script>
+</head>
+<body>
+<main id="login-screen" class="signin">
+  <form id="login-form" class="login-card">
+    <div class="brand"><span class="brand-mark">G</span> Graph Operations</div>
+    <h1>Administrator sign-in</h1>
+    <label for="access">Administrator token</label>
+    <input id="access" type="password" required autocomplete="off" spellcheck="false">
+    <button class="primary">Sign in</button>
+    <p id="login-error" class="error" role="alert"></p>
+  </form>
+</main>
+<div id="workspace" class="shell" hidden>
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">G</span> Graph Operations</div>
+    <nav aria-label="Console">
+      <button data-tab="overview" aria-current="page">Overview</button>
+      <button data-tab="import">Data import</button>
+      <button data-tab="sync">Sync preview</button>
+      <button data-tab="history">Operation history</button>
+      <button data-tab="monitor">Monitoring</button>
+    </nav>
+    <div class="sidebar-bottom"><span id="role"></span><button id="logout" class="quiet">Sign out</button></div>
+  </aside>
+  <main class="main">
+    <header class="top"><span class="badge">Synthetic lab</span><span id="session-label"></span></header>
+    <section id="panel-overview" class="panel">
+      <div class="heading"><div><h1>Operations overview</h1><p>Course and prerequisite graph</p></div><button data-refresh>Refresh</button></div>
+      <div id="overview-health" class="health-grid"></div>
+      <div id="overview-stats" class="metrics-grid"></div>
+    </section>
+    <section id="panel-import" class="panel" hidden>
+      <div class="heading"><div><h1>Data import</h1><p>Courses and directed PREREQ relations</p></div></div>
+      <form id="import-form" class="band">
+        <label for="file">CSV or JSON file</label>
+        <input type="file" id="file" accept=".csv,.json" required>
+        <div class="actions"><button class="primary">Validate file</button></div>
+      </form>
+      <details class="band"><summary>Input format</summary>
+        <p>JSON fields: <code>courses</code> and <code>relations</code>. Courses require <code>id</code> and <code>name</code>. Relations require <code>type</code>, <code>source</code> and <code>target</code>.</p>
+        <p>CSV columns: <code>kind,id,name,category,semester,credits,hours,layer,description,type,source,target,reason,strength</code></p>
+      </details>
+      <div id="import-result" role="status"></div>
+    </section>
+    <section id="panel-sync" class="panel" hidden>
+      <div class="heading"><div><h1>Sync preview</h1><p>Incremental updates to the synthetic graph</p></div></div>
+      <form id="preview-form" class="band">
+        <label for="scope">Managed course IDs</label>
+        <input id="scope" placeholder="LAB-EXAMPLE-A, LAB-EXAMPLE-B" required>
+        <div class="actions"><button class="primary" id="preview-btn">Build preview</button></div>
+      </form>
+      <div id="preview-result" role="status"></div>
+      <div id="confirm" class="actions" hidden>
+        <label class="check"><input id="confirmed" type="checkbox"> Confirm these incremental changes</label>
+        <button id="execute" class="primary" disabled>Execute sync</button>
+      </div>
+      <div id="execution-result" role="status"></div>
+      <form id="recovery" class="band">
+        <h2>Confirm an operation</h2>
+        <label for="operation-key">Idempotency key</label>
+        <input id="operation-key" minlength="16" maxlength="128" required spellcheck="false">
+        <div class="actions"><button id="lookup">Check outcome</button><button id="retry" type="button" hidden>Retry same operation</button></div>
+        <div id="lookup-result" role="status"></div>
+      </form>
+    </section>
+    <section id="panel-history" class="panel" hidden>
+      <div class="heading"><div><h1>Operation history</h1><p>Committed Neo4j records</p></div><button id="history-refresh">Refresh</button></div>
+      <div id="history-result"></div><div class="actions"><button id="next" hidden>Next page</button></div>
+      <div id="detail-result" role="status"></div>
+    </section>
+    <section id="panel-monitor" class="panel" hidden>
+      <div class="heading"><div><h1>Runtime monitoring</h1><p id="metric-since">Counters since process start</p></div><button data-refresh>Refresh</button></div>
+      <div id="monitor-health" class="health-grid"></div><div id="monitor-table"></div>
+    </section>
+    <p id="notice" role="status" aria-live="polite"></p>
+  </main>
+</div>
+</body>
+</html>

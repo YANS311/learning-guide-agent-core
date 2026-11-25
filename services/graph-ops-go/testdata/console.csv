@@ -1,0 +1,4 @@
+kind,id,name,category,semester,credits,hours,layer,description,type,source,target,reason,strength
+course,LAB-E2E-A,Synthetic Systems,,,2,30,,,,,,,
+course,LAB-E2E-B,Synthetic Networks,,,3,45,,,,,,,
+relation,,,,,,,,,PREREQ,LAB-E2E-A,LAB-E2E-B,Synthetic prerequisite,strong

@@ -35,6 +35,7 @@ type Repository struct {
 	driver       neo4j.DriverWithContext
 	marker       string
 	afterCourses func(context.Context, neo4j.ExplicitTransaction) error
+	commitAck    func(context.Context, neo4j.ExplicitTransaction) error
 }
 
 func tokenKey(s string) ([]byte, error) {
@@ -157,6 +158,13 @@ func (r *Repository) read(ctx context.Context, work func(runner) (any, error)) (
 
 func (r *Repository) Ready(ctx context.Context) error {
 	_, err := r.read(ctx, func(tx runner) (any, error) {
+		identity, err := records(ctx, tx, "CALL db.info() YIELD name RETURN name", nil)
+		if err != nil {
+			return nil, err
+		}
+		if len(identity) != 1 || identity[0].Values[0] != Database {
+			return nil, fail(503, "lab_identity_unverified")
+		}
 		if _, err := r.epoch(ctx, tx, false); err != nil {
 			return nil, err
 		}

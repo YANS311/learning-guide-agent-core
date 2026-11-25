@@ -2,7 +2,7 @@ name: Graph Ops CI
 
 on:
   push:
-    branches: [main, master, "feature/go-graph-ops-phase1", "feature/go-graph-ops-phase2"]
+    branches: [main, master, "feature/go-graph-ops-phase1", "feature/go-graph-ops-phase2", "feature/go-graph-ops-phase3"]
     paths: ["services/graph-ops-go/**", ".github/workflows/graph-ops.yml", ".github/workflows/ci.yml"]
   pull_request:
     branches: [main, master]
@@ -26,6 +26,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - name: Check Go format
         run: test -z "$(gofmt -l .)"
       - name: Vet
@@ -54,10 +57,17 @@ jobs:
           export GRAPHOPS_LAB_BOLT=bolt://127.0.0.1:27687
           export GRAPHOPS_LAB_MARKER="$(openssl rand -hex 32)"
           export GRAPHOPS_LAB_PLAN_KEY="$(openssl rand -hex 32)"
+          export GRAPHOPS_ADMIN_TOKEN="$(openssl rand -hex 32)"
           echo "::add-mask::$GRAPHOPS_LAB_MARKER"
           echo "::add-mask::$GRAPHOPS_LAB_PLAN_KEY"
+          echo "::add-mask::$GRAPHOPS_ADMIN_TOKEN"
           GRAPHOPS_INTEGRATION=1 go test -race -count=1 -v ./internal/neoops -run '^TestNeo4jIntegration$'
           python tests/lab_contract.py "$RUNNER_TEMP/graph-ops"
+          npm install --prefix "$RUNNER_TEMP/graphops-browser" --no-audit --no-fund playwright@1.65.1
+          export NODE_PATH="$RUNNER_TEMP/graphops-browser/node_modules"
+          "$NODE_PATH/.bin/playwright" install --with-deps chromium
+          node tests/console.cjs "$RUNNER_TEMP/graph-ops"
+          GRAPHOPS_E2E_ASSERT=1 go test -count=1 -v ./internal/neoops -run '^TestBrowserDatabaseState$'
       - name: Scan service source and fixtures for secrets
         run: |
           dir="$(mktemp -d)"

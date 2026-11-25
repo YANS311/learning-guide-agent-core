@@ -56,12 +56,14 @@ func fixture(t *testing.T) (*Repository, *Service) {
 	return r, s
 }
 
-func freshLab(t *testing.T, r *Repository) {
+func freshLab(t *testing.T, r *Repository, incomplete func()) {
 	t.Helper()
 	db := labQuery(t, r, "CALL db.info() YIELD name RETURN name", nil)
 	if len(db) != 1 || db[0].Values[0] != Database || count(t, r, "MATCH (n) RETURN count(n)") != 0 || len(labQuery(t, r, "SHOW CONSTRAINTS", nil)) != 0 {
 		t.Fatal("refusing setup: expected a dedicated empty lab database with no constraints")
 	}
+	labQuery(t, r, "CREATE (:GraphOpsLab {id:'phase2', epoch:0, marker:$marker})", map[string]any{"marker": r.marker})
+	incomplete()
 	for _, q := range []string{
 		"CREATE CONSTRAINT graphops_course_id FOR (n:Course) REQUIRE n.id IS UNIQUE",
 		"CREATE CONSTRAINT graphops_course_name FOR (n:Course) REQUIRE n.name IS UNIQUE",
@@ -70,7 +72,6 @@ func freshLab(t *testing.T, r *Repository) {
 	} {
 		labQuery(t, r, q, nil)
 	}
-	labQuery(t, r, "CREATE (:GraphOpsLab {id:'phase2', epoch:0, marker:$marker})", map[string]any{"marker": r.marker})
 }
 
 func previewFor(t *testing.T, s *Service, data graph.Data, ids ...string) Command {
@@ -104,7 +105,23 @@ func TestNeo4jIntegration(t *testing.T) {
 	ctx := context.Background()
 	r, s := fixture(t)
 	r2, s2 := fixture(t)
-	freshLab(t, r)
+	freshLab(t, r, func() {
+		t.Run("schema_admission", func(t *testing.T) {
+			c := course("NO-SCHEMA")
+			cmd := previewFor(t, s, graph.Data{Courses: []graph.Course{c}}, c.ID)
+			_, err := s.Execute(ctx, cmd, "synthetic-schema-check")
+			code(t, err, "lab_constraints_missing")
+			if count(t, r, "MATCH (n:Course) RETURN count(n)") != 0 {
+				t.Fatal("write before schema verification")
+			}
+			wrong, err := Open(os.Getenv("GRAPHOPS_LAB_BOLT"), strings.Repeat("aa", 32))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cleanup(wrong.Close)
+			code(t, wrong.Ready(ctx), "lab_identity_unverified")
+		})
+	})
 	if err := s.Ready(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -301,6 +318,49 @@ MATCH (a)-[:SUPPORTS]->(:Indicator {code:'SYN-1'}) RETURN count(r)`) != 1 {
 			t.Fatalf("%+v %v", op, err)
 		}
 	})
+	t.Run("commit_ack_loss_emulated_after_real_commit", func(t *testing.T) {
+		c := course("ACK-LOSS")
+		cmd := previewFor(t, s, graph.Data{Courses: []graph.Course{c}}, c.ID)
+		r.commitAck = func(ctx context.Context, tx neo4j.ExplicitTransaction) error {
+			if err := tx.Commit(ctx); err != nil {
+				t.Error("real commit error:", err)
+				return err
+			}
+			return errors.New("synthetic missing acknowledgement after commit")
+		}
+		defer func() { r.commitAck = nil }()
+		const key = "synthetic-ack-loss-key"
+		_, err := s.Execute(ctx, cmd, key)
+		code(t, err, "commit_outcome_unknown")
+		if count(t, r, "MATCH (:Course {id:'LAB-ACK-LOSS'}) RETURN count(*)") != 1 {
+			t.Fatal("committed course missing")
+		}
+		record, err := s2.Lookup(ctx, key)
+		if err != nil || record.Status != "committed" {
+			t.Fatalf("%+v %v", record, err)
+		}
+		again, err := s2.Execute(ctx, cmd, key)
+		if err != nil || !again.Replay || again.Operation.ID != record.ID {
+			t.Fatalf("%+v %v", again, err)
+		}
+	})
+	t.Run("committed_history_and_detail", func(t *testing.T) {
+		head, err := s.History(ctx, 2, "", "committed")
+		if err != nil || len(head.Items) != 2 || head.NextCursor == "" || head.Items[0].Finished.Before(head.Items[1].Finished) {
+			t.Fatalf("%+v %v", head, err)
+		}
+		next, err := s.History(ctx, 2, head.NextCursor, "committed")
+		if err != nil || len(next.Items) != 2 || next.Items[0].ID == head.Items[1].ID {
+			t.Fatalf("%+v %v", next, err)
+		}
+		if _, err := s.History(ctx, 2, "", "failed"); err == nil {
+			t.Fatal("unsupported status accepted")
+		}
+		got, err := s.Detail(ctx, head.Items[0].ID)
+		if err != nil || got.ID != head.Items[0].ID {
+			t.Fatalf("%+v %v", got, err)
+		}
+	})
 	t.Logf("actual Neo4j state: courses=%d prereq=%d operations=%d supports=%d",
 		count(t, r, "MATCH (n:Course) RETURN count(n)"), count(t, r, "MATCH ()-[r:PREREQ]->() RETURN count(r)"),
 		count(t, r, "MATCH (n:GraphOpsOperation) RETURN count(n)"), count(t, r, "MATCH ()-[r:SUPPORTS]->() RETURN count(r)"))
@@ -338,4 +398,31 @@ func TestUnavailableAndIsolationGuards(t *testing.T) {
 	if err := r.Ready(ctx); err == nil {
 		t.Fatal("expected unavailable dependency")
 	}
+}
+
+func TestBrowserDatabaseState(t *testing.T) {
+	if os.Getenv("GRAPHOPS_E2E_ASSERT") != "1" {
+		t.Skip("run after the authenticated browser workflow against the isolated lab")
+	}
+	r, s := fixture(t)
+	if err := s.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		"MATCH (:Course {id:'LAB-E2E-A'})-[r:PREREQ]->(:Course {id:'LAB-E2E-B'}) RETURN count(r)",
+		"MATCH (c:Course {id:'LAB-E2E-LOST'}) RETURN count(c)",
+		"MATCH (c:Course {id:'LAB-E2E-DRIFT'}) RETURN count(c)",
+	} {
+		if count(t, r, q) != 1 {
+			t.Fatalf("expected exactly one committed row for %s", q)
+		}
+	}
+	if count(t, r, "MATCH (c:Course) WHERE c.id IN ['LAB-E2E-STALE','LAB-E2E-EXPIRED'] RETURN count(c)") != 0 {
+		t.Fatal("rejected course was written")
+	}
+	if count(t, r, "MATCH (o:GraphOpsOperation) RETURN count(o)") != 9 {
+		t.Fatal("unexpected committed operation count")
+	}
+	t.Logf("browser final Neo4j state: courses=%d, prereq=%d, operations=9",
+		count(t, r, "MATCH (n:Course) RETURN count(n)"), count(t, r, "MATCH ()-[r:PREREQ]->() RETURN count(r)"))
 }

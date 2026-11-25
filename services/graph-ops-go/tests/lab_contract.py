@@ -17,8 +17,12 @@ def server(binary, env):
         addr = "127.0.0.1:" + str(sock.getsockname()[1])
     process = subprocess.Popen([binary, "-listen", addr], env=env)
     try:
+        session = ""
+
         def call(path, data=None, key=None):
             headers = {"Content-Type": "application/json"}
+            if session:
+                headers["Authorization"] = "Bearer " + session
             if key is not None:
                 headers["Idempotency-Key"] = key
             req = Request("http://" + addr + path, None if data is None else json.dumps(data).encode(), headers)
@@ -41,6 +45,10 @@ def server(binary, env):
                 time.sleep(0.1)
         else:
             raise RuntimeError("Go server did not start")
+        assert call("/api/v1/graph/db/execute", {})[0] == 401
+        status, result = call("/api/v1/admin/login", {"token": env["GRAPHOPS_ADMIN_TOKEN"]})
+        assert status == 200
+        session = result["session"]
         yield call
     finally:
         process.terminate()
