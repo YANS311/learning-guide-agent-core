@@ -98,6 +98,7 @@ async function main(){
     await text(page,"访问令牌无效或无法创建会话（login_rejected · auth）");
     await signIn(page);
     await text(page,"已就绪");
+    assert.equal(await page.getByText("合成数据实验环境",{exact:true}).count(),0);
     await capture(page,"02-overview");
     await load(page,{name:"bad.csv",mimeType:"text/csv",buffer:Buffer.from("bad,header\n")});
     await text(page,"导入校验未通过");
