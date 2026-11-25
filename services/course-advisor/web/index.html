@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>智能选课导学 Agent 系统 V1.0</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header class="top"><strong>智能选课导学 Agent 系统 <span>V1.0</span></strong><span id="source" role="status"></span></header>
+<main>
+<div id="notice" class="notice" role="alert" hidden></div>
+<div class="layout">
+<aside aria-label="选课设置">
+<form id="profile">
+<h2>学生画像</h2>
+<div class="fields two"><label>称呼<input name="name" maxlength="60" required></label><label>培养阶段<input name="stage" maxlength="40"></label></div>
+<div class="fields two"><label>培养方向<input name="direction" maxlength="80"></label><label>选课偏好<input name="preference" maxlength="120"></label></div>
+<label for="course-search">已修课程 <span id="checked-count"></span></label>
+<input id="course-search" type="search" placeholder="课程名称或编号" maxlength="50">
+<div id="completed" class="choices" aria-label="已修课程列表"></div>
+<button class="secondary" type="submit">保存画像</button><small id="revision" role="status"></small>
+</form>
+<form id="request">
+<h2>选课目标</h2>
+<label>目标<textarea name="goal" rows="2" maxlength="240" required></textarea></label>
+<div class="fields two"><label>学分上限<input name="credits" type="number" min=".01" max="100" step=".01"></label>
+<label>推荐门数<input name="limit" type="number" min="1" max="8" value="3" required></label></div>
+<label>课程必含关键词<input name="keyword" maxlength="60"></label>
+<label>候选课程编号<input name="candidates" placeholder="多个编号以逗号分隔" maxlength="420"></label>
+<button class="primary" type="submit" id="generate">生成方案</button><button class="secondary" type="button" id="cancel" hidden>取消任务</button>
+<p id="lineage" class="muted" hidden></p>
+</form>
+</aside>
+<section class="workspace" aria-label="选课结果">
+<nav class="tabs" aria-label="结果视图"><button data-tab="plan" aria-current="page">选课方案</button><button data-tab="history">历史版本</button></nav>
+<section id="plan">
+<div class="section-head"><h1>选课方案</h1><span id="state" class="state"></span></div>
+<ol id="timeline" class="timeline" aria-label="任务进度" aria-live="polite"></ol>
+<p id="empty" class="muted">暂无选课方案</p>
+<div id="result"></div>
+</section>
+<section id="history" hidden>
+<div class="section-head"><h1>历史版本</h1><button class="secondary" id="refresh" type="button">刷新</button></div>
+<div id="history-list"></div>
+<div class="paging"><button class="secondary" id="prev" type="button">上一页</button><button class="secondary" id="next" type="button">下一页</button></div>
+</section>
+</section>
+</div>
+</main>
+</body>
+</html>
