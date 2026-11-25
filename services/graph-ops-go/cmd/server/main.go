@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"learning-guide/graph-ops/internal/httpapi"
+	"learning-guide/graph-ops/internal/neoops"
 )
 
 func main() {
@@ -23,7 +24,26 @@ func main() {
 		log.Error("a loopback address and nonzero port are required")
 		os.Exit(2)
 	}
-	server := &http.Server{Addr: *address, Handler: httpapi.New(log, 5*time.Second),
+	var lab *neoops.Service
+	uri, marker, key := os.Getenv("GRAPHOPS_LAB_BOLT"), os.Getenv("GRAPHOPS_LAB_MARKER"), os.Getenv("GRAPHOPS_LAB_PLAN_KEY")
+	if uri != "" || marker != "" || key != "" {
+		repo, err := neoops.Open(uri, marker)
+		if err != nil {
+			log.Error("invalid lab configuration")
+			os.Exit(2)
+		}
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = repo.Close(ctx)
+		}()
+		lab, err = neoops.New(repo, key)
+		if err != nil {
+			log.Error("invalid lab signing configuration")
+			os.Exit(2)
+		}
+	}
+	server := &http.Server{Addr: *address, Handler: httpapi.NewWithLab(log, 5*time.Second, lab),
 		ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 8 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

@@ -2,7 +2,7 @@ name: Graph Ops CI
 
 on:
   push:
-    branches: [main, master, "feature/go-graph-ops-phase1"]
+    branches: [main, master, "feature/go-graph-ops-phase1", "feature/go-graph-ops-phase2"]
     paths: ["services/graph-ops-go/**", ".github/workflows/graph-ops.yml", ".github/workflows/ci.yml"]
   pull_request:
     branches: [main, master]
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27.x"
-          cache: false
+          cache-dependency-path: services/graph-ops-go/go.sum
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -38,6 +38,26 @@ jobs:
         run: |
           go build -o "$RUNNER_TEMP/graph-ops" ./cmd/server
           python tests/contract.py "$RUNNER_TEMP/graph-ops"
+      - name: Run isolated Neo4j integration and HTTP contracts
+        shell: bash
+        run: |
+          name="graphops-lab-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          docker run -d --rm --name "$name" -p 127.0.0.1:27687:7687 \
+            -e NEO4J_AUTH=none -e NEO4J_initial_dbms_default__database=graphops-phase2-test \
+            -e NEO4J_dbms_usage__report_enabled=false neo4j:5.26.18-community
+          trap 'docker stop "$name" >/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if docker exec "$name" cypher-shell -d graphops-phase2-test 'RETURN 1'; then break; fi
+            sleep 2
+          done
+          docker exec "$name" cypher-shell -d graphops-phase2-test 'RETURN 1'
+          export GRAPHOPS_LAB_BOLT=bolt://127.0.0.1:27687
+          export GRAPHOPS_LAB_MARKER="$(openssl rand -hex 32)"
+          export GRAPHOPS_LAB_PLAN_KEY="$(openssl rand -hex 32)"
+          echo "::add-mask::$GRAPHOPS_LAB_MARKER"
+          echo "::add-mask::$GRAPHOPS_LAB_PLAN_KEY"
+          GRAPHOPS_INTEGRATION=1 go test -race -count=1 -v ./internal/neoops -run '^TestNeo4jIntegration$'
+          python tests/lab_contract.py "$RUNNER_TEMP/graph-ops"
       - name: Scan service source and fixtures for secrets
         run: |
           dir="$(mktemp -d)"

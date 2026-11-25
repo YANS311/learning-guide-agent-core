@@ -1,6 +1,6 @@
-# Graph Ops Phase 1
+# Graph Ops
 
-This loopback-only Go service validates an import and compares a supplied course/prerequisite snapshot with a target. It does not connect to a database, execute changes, or expose a public listener. All fixtures are synthetic.
+In the default mode, this loopback-only Go service validates an import and compares a supplied course/prerequisite snapshot with a target. Database writes are available only in the opt-in isolated Phase 2 lab. All fixtures are synthetic.
 
 ```sh
 go run ./cmd/server -listen 127.0.0.1:8090
@@ -37,3 +37,61 @@ go test -cover ./...
 go build -o /tmp/graph-ops ./cmd/server
 python tests/contract.py /tmp/graph-ops
 ```
+
+## Phase 2 isolated Neo4j lab
+
+The original preview endpoint still accepts caller-provided snapshots. The lab endpoints
+are disabled unless all three environment variables are set: `GRAPHOPS_LAB_BOLT`,
+`GRAPHOPS_LAB_MARKER`, and `GRAPHOPS_LAB_PLAN_KEY`. Use a fresh Neo4j Community
+5.26 instance with database `graphops-phase2-test`, no external writers and a
+non-default Bolt port bound to a loopback IP. The runtime does not create schema
+or enable writes on a general database. The isolated fixture provisions four uniqueness
+constraints and a matching marker, after checking the database name and proving it is empty.
+
+| Method | Route | Request |
+|---|---|---|
+| POST | `/api/v1/graph/db/preview` | `{"scope":{"course_ids":["LAB-EXAMPLE"]},"target":{"courses":[{"id":"LAB-EXAMPLE","name":"Synthetic example"}],"relations":[]}}` |
+| POST | `/api/v1/graph/db/execute` | `{"plan_token":"<preview token>","target":{...}}` and a unique random `Idempotency-Key` header |
+| GET | `/api/v1/graph/db/operation` | Same `Idempotency-Key` header |
+
+Only incremental upserts are allowed. Scope must explicitly list managed `LAB-*`
+course IDs. Both relation endpoints must be in scope. Course and relationship records
+describe complete desired values for owned fields. If a managed optional field is
+omitted, its Go default is used. Existing nodes and edges must carry the lab's
+ownership marker. Other labels, fields and relationship types are left intact.
+
+A preview token expires after three minutes. It binds the scope, canonical target digest,
+database epoch, snapshot digest and change counts. Go writers share one Neo4j lock node
+and read the version under that lock. The commit and successful execution record are
+atomic in Neo4j. Keep the same signing key across lab processes. If a commit response
+is ambiguous, look up by the same key. A 404 means no committed result has been
+observed. When retrying use the identical command and key. A known rejected or
+rolled-back attempt appears in structured logs and has no committed operation record.
+
+This coordination does not serialize clients that bypass the lock. The tested configuration
+is a disposable lab with locally disabled Neo4j authentication. Do not expose it through
+public listeners, proxy it, or point existing import tools at it.
+
+### Reproduce the isolated tests
+
+Example with Docker, from the module directory on a trusted developer machine.
+The readiness query must succeed before launching tests. Run the integration suite
+only once per fresh container. The ordinary suite requires no Neo4j.
+
+```sh
+docker run -d --rm --name graphops-phase2-lab -p 127.0.0.1:27687:7687 \
+  -e NEO4J_AUTH=none -e NEO4J_initial_dbms_default__database=graphops-phase2-test \
+  neo4j:5.26.18-community
+# Wait until this command returns 1.
+docker exec graphops-phase2-lab cypher-shell -d graphops-phase2-test 'RETURN 1'
+export GRAPHOPS_LAB_BOLT=bolt://127.0.0.1:27687
+export GRAPHOPS_LAB_MARKER="$(openssl rand -hex 32)"
+export GRAPHOPS_LAB_PLAN_KEY="$(openssl rand -hex 32)"
+GRAPHOPS_INTEGRATION=1 go test -race -v -count=1 ./internal/neoops -run '^TestNeo4jIntegration$'
+go build -o /tmp/graph-ops ./cmd/server
+python tests/lab_contract.py /tmp/graph-ops
+docker stop graphops-phase2-lab
+```
+
+The integration suite asserts stored nodes, relationships, foreign data, and operation
+records with real Cypher queries. No school or deployment data is used.

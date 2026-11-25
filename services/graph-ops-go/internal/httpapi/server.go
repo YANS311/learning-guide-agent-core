@@ -18,6 +18,7 @@ import (
 
 	"learning-guide/graph-ops/internal/graph"
 	"learning-guide/graph-ops/internal/importer"
+	"learning-guide/graph-ops/internal/neoops"
 )
 
 const MaxBody = 2 << 20
@@ -29,7 +30,8 @@ const (
 	metrics  = "/metrics"
 )
 
-var operations = map[string]string{live: "GET", ready: "GET", validate: "POST", preview: "POST", metrics: "GET"}
+var operations = map[string]string{live: "GET", ready: "GET", validate: "POST", preview: "POST", metrics: "GET",
+	labPreview: "POST", labExecute: "POST", labOperation: "GET"}
 
 type counter struct {
 	count   uint64
@@ -42,6 +44,8 @@ type API struct {
 	requests            map[string]counter
 	validated, rejected uint64
 	diff                counter
+	lab                 *neoops.Service
+	labMetrics          labMetrics
 }
 
 func New(logger *slog.Logger, timeout time.Duration) *API {
@@ -89,6 +93,16 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			a.rejected++
 		}
 	}
+	if route == labExecute && r.Method == "POST" {
+		if result.status == 200 {
+			a.labMetrics.success++
+		} else {
+			a.labMetrics.failure++
+		}
+		if result.status == 409 {
+			a.labMetrics.conflicts++
+		}
+	}
 	a.mu.Unlock()
 	log.Info("response", "status", result.status, "error_code", result.code, "duration_ms", time.Since(start).Milliseconds())
 	if s, ok := result.body.(string); ok {
@@ -120,10 +134,22 @@ func (a *API) run(ctx context.Context, w http.ResponseWriter, r *http.Request, r
 		return canceled(ctx.Err())
 	}
 	switch route {
-	case live, ready:
+	case ready:
+		if a.lab != nil {
+			return a.labReady(ctx)
+		}
+		fallthrough
+	case live:
 		return response{200, "", map[string]any{"status": "ok", "snapshot_source": "request", "database_connected": false}}
 	case metrics:
 		return response{200, "", a.metricText()}
+	case labPreview, labExecute, labOperation:
+		if a.lab == nil {
+			return failure(503, "lab_not_configured", "database", "lab database mode is disabled")
+		}
+		if route == labOperation {
+			return a.processLab(ctx, r, route, nil, log)
+		}
 	}
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || (media != "application/json" && !(route == validate && media == "text/csv")) {
@@ -155,6 +181,9 @@ func (a *API) run(ctx context.Context, w http.ResponseWriter, r *http.Request, r
 		return failure(400, "invalid_encoding", "body", "request body must be UTF-8")
 	}
 	log.Info("parse", "format", media)
+	if route == labPreview || route == labExecute {
+		return a.processLab(ctx, r, route, body, log)
+	}
 	return a.process(ctx, route, media, body, log)
 }
 
@@ -221,7 +250,7 @@ func (a *API) metricText() string {
 	defer a.mu.Unlock()
 	var out bytes.Buffer
 	fmt.Fprintln(&out, "# TYPE graphops_http_requests_total counter")
-	routes := []string{live, ready, validate, preview, metrics, "unknown"}
+	routes := []string{live, ready, validate, preview, labPreview, labExecute, labOperation, metrics, "unknown"}
 	for _, r := range routes {
 		fmt.Fprintf(&out, "graphops_http_requests_total{route=%q} %d\n", r, a.requests[r].count)
 	}
@@ -232,5 +261,6 @@ func (a *API) metricText() string {
 	}
 	fmt.Fprintf(&out, "# TYPE graphops_import_validation_total counter\ngraphops_import_validation_total{result=\"success\"} %d\ngraphops_import_validation_total{result=\"failure\"} %d\n", a.validated, a.rejected)
 	fmt.Fprintf(&out, "# TYPE graphops_diff_duration_seconds summary\ngraphops_diff_duration_seconds_sum %g\ngraphops_diff_duration_seconds_count %d\n", a.diff.seconds, a.diff.count)
+	a.labMetrics.render(&out)
 	return out.String()
 }
