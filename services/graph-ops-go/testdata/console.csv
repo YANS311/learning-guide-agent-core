@@ -1,4 +1,4 @@
 kind,id,name,category,semester,credits,hours,layer,description,type,source,target,reason,strength
-course,LAB-E2E-A,Synthetic Systems,,,2,30,,,,,,,
-course,LAB-E2E-B,Synthetic Networks,,,3,45,,,,,,,
-relation,,,,,,,,,PREREQ,LAB-E2E-A,LAB-E2E-B,Synthetic prerequisite,strong
+course,LAB-E2E-A,合成课程甲：系统基础,,,2,30,,,,,,,
+course,LAB-E2E-B,合成课程乙：网络基础,,,3,45,,,,,,,
+relation,,,,,,,,,PREREQ,LAB-E2E-A,LAB-E2E-B,合成示例先修关系,strong

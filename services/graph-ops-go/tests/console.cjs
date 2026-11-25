@@ -41,31 +41,31 @@ async function text(page, value) {
   await page.getByText(value,{exact:true}).first().waitFor({state:"visible"});
 }
 async function signIn(page) {
-  await page.getByLabel("Administrator token").fill(admin);
-  await page.getByRole("button",{name:"Sign in",exact:true}).click();
-  await text(page,"Operations overview");
+  await page.getByLabel("管理员访问令牌").fill(admin);
+  await page.getByRole("button",{name:"登录",exact:true}).click();
+  await text(page,"运行概览");
 }
 async function tab(page,name) {
   await page.getByRole("navigation").getByRole("button",{name,exact:true}).click();
 }
 function payload(id) {
   return {name:"synthetic.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify({
-    courses:[{id,name:"Synthetic "+id}],relations:[]
+    courses:[{id,name:"合成测试课程 "+id}],relations:[]
   }))};
 }
 async function load(page,file) {
-  await tab(page,"Data import");
+  await tab(page,"数据导入");
   await page.locator("#file").setInputFiles(file);
-  await page.getByRole("button",{name:"Validate file"}).click();
+  await page.getByRole("button",{name:"校验文件"}).click();
 }
 async function preview(page) {
-  await page.getByRole("button",{name:"Open sync preview"}).click();
-  await page.getByRole("button",{name:"Build preview"}).click();
-  await text(page,"Preview ready");
+  await page.getByRole("button",{name:"前往同步预览"}).click();
+  await page.getByRole("button",{name:"生成预览"}).click();
+  await text(page,"同步计划已生成");
 }
 async function confirm(page) {
-  await page.getByLabel("Confirm these incremental changes").check();
-  await page.getByRole("button",{name:"Execute sync"}).click();
+  await page.getByLabel("我已核对并确认本次增量变更").check();
+  await page.getByRole("button",{name:"执行同步"}).click();
 }
 async function requestAdmin(base) {
   const login = await fetch(base+"/api/v1/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -85,49 +85,49 @@ async function main(){
   const children=[];
   try {
     const base=await start(children);
-    const page=await browser.newPage({viewport:{width:1360,height:850}});
+    const page=await browser.newPage({locale:"zh-CN",viewport:{width:1360,height:850}});
     const faults=[];
     page.on("pageerror",error=>faults.push(error.message));
     assert.equal((await fetch(base+"/api/v1/graph/db/execute",
       {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})).status,401);
     await page.goto(base+"/console");
     await capture(page,"01-login");
-    await page.getByLabel("Administrator token").fill("not-a-valid-token");
-    await page.getByRole("button",{name:"Sign in",exact:true}).click();
+    await page.getByLabel("管理员访问令牌").fill("not-a-valid-token");
+    await page.getByRole("button",{name:"登录",exact:true}).click();
     await page.locator("#login-error").waitFor({state:"visible"});
-    await text(page,"login_rejected · auth · administrator session could not be created");
+    await text(page,"访问令牌无效或无法创建会话（login_rejected · auth）");
     await signIn(page);
-    await text(page,"Ready");
+    await text(page,"已就绪");
     await capture(page,"02-overview");
     await load(page,{name:"bad.csv",mimeType:"text/csv",buffer:Buffer.from("bad,header\n")});
-    await text(page,"Import rejected");
+    await text(page,"导入校验未通过");
     await load(page,path.join(__dirname,"../testdata/console.csv"));
-    await text(page,"Validation passed");
+    await text(page,"数据校验通过");
     await capture(page,"03-import");
-    await page.getByRole("button",{name:"Open sync preview"}).click();
-    await page.getByLabel("Managed course IDs").fill("LAB-E2E-A");
-    await page.getByRole("button",{name:"Build preview"}).click();
-    await text(page,"Preview rejected");
-    await page.getByLabel("Managed course IDs").fill("LAB-E2E-A, LAB-E2E-B");
-    await page.getByRole("button",{name:"Build preview"}).click();
-    await text(page,"Preview ready");
+    await page.getByRole("button",{name:"前往同步预览"}).click();
+    await page.getByLabel("管理范围（课程编号）").fill("LAB-E2E-A");
+    await page.getByRole("button",{name:"生成预览"}).click();
+    await text(page,"预览未通过");
+    await page.getByLabel("管理范围（课程编号）").fill("LAB-E2E-A, LAB-E2E-B");
+    await page.getByRole("button",{name:"生成预览"}).click();
+    await text(page,"同步计划已生成");
     await capture(page,"04-preview");
     let executions=0;
     page.on("request",r=>{if(r.url().endsWith("/db/execute")) executions++});
-    await page.getByLabel("Confirm these incremental changes").check();
+    await page.getByLabel("我已核对并确认本次增量变更").check();
     await page.locator("#execute").evaluate(b=>{b.click();b.click()});
-    await text(page,"Sync committed");
+    await text(page,"同步已提交");
     assert.equal(executions,1);
     await capture(page,"05-committed");
-    await tab(page,"Operation history");
-    await page.getByRole("button",{name:"View details"}).first().click();
-    await text(page,"Committed operation");
+    await tab(page,"操作历史");
+    await page.getByRole("button",{name:"查看详情"}).first().click();
+    await text(page,"已提交操作");
     await capture(page,"06-history");
-    await tab(page,"Monitoring");
-    await text(page,"Average transaction latency");
+    await tab(page,"运行监测");
+    await text(page,"平均事务耗时");
     await capture(page,"07-monitoring");
     await load(page,payload("LAB-E2E-LOST"));
-    await text(page,"Validation passed");
+    await text(page,"数据校验通过");
     await preview(page);
     let key;
     await page.route("**/api/v1/graph/db/execute",async route=>{
@@ -137,53 +137,53 @@ async function main(){
       await route.abort("failed");
     },{times:1});
     await confirm(page);
-    await text(page,"Outcome not confirmed");
+    await text(page,"提交结果待确认");
     assert.equal(await page.inputValue("#operation-key"),key);
     await capture(page,"08-response-lost");
     await page.reload();
     await signIn(page);
-    await tab(page,"Sync preview");
+    await tab(page,"同步预览");
     assert.equal(await page.inputValue("#operation-key"),key);
-    await page.getByRole("button",{name:"Check outcome"}).click();
-    await text(page,"Committed record found");
+    await page.getByRole("button",{name:"查询结果"}).click();
+    await text(page,"已查到提交记录");
     await load(page,payload("LAB-E2E-STALE"));
-    await text(page,"Validation passed");
+    await text(page,"数据校验通过");
     await preview(page);
     const call=await requestAdmin(base);
-    const target={courses:[{id:"LAB-E2E-DRIFT",name:"Synthetic drift"}],relations:[]};
+    const target={courses:[{id:"LAB-E2E-DRIFT",name:"合成并发变更课程"}],relations:[]};
     const p=await call("/api/v1/graph/db/preview",{scope:{course_ids:["LAB-E2E-DRIFT"]},target});
     await call("/api/v1/graph/db/execute",{plan_token:p.plan_token,target},"synthetic-browser-drift");
     await confirm(page);
-    await text(page,"Sync rejected");
+    await text(page,"同步已拒绝");
     await page.getByText(/database_state_changed/).waitFor({state:"visible"});
     const shortPlan=await start(children,{GRAPHOPS_LAB_PLAN_SECONDS:"1"});
     const expiry=await browser.newPage();
     await expiry.goto(shortPlan+"/console");
     await signIn(expiry);
     await load(expiry,payload("LAB-E2E-EXPIRED"));
-    await text(expiry,"Validation passed");
+    await text(expiry,"数据校验通过");
     await preview(expiry);
     await expiry.waitForTimeout(1200);
     await confirm(expiry);
-    await text(expiry,"Sync rejected");
+    await text(expiry,"同步已拒绝");
     await expiry.getByText(/plan_expired/).waitFor({state:"visible"});
     const shortSession=await start(children,{GRAPHOPS_ADMIN_SESSION_SECONDS:"1"});
     const auth=await browser.newPage();
     await auth.goto(shortSession+"/console");
     await signIn(auth);
-    await text(auth,"Ready");
+    await text(auth,"已就绪");
     await auth.waitForTimeout(1200);
-    await auth.getByRole("button",{name:"Refresh",exact:true}).filter({visible:true}).click();
-    await text(auth,"Session expired. Sign in to continue.");
+    await auth.getByRole("button",{name:"刷新",exact:true}).filter({visible:true}).click();
+    await text(auth,"会话已过期，请重新登录。");
     const unavailable=await start(children,{GRAPHOPS_LAB_BOLT:"bolt://127.0.0.1:"+await unusedPort()});
     const outage=await browser.newPage();
     await outage.goto(unavailable+"/console");
     await signIn(outage);
-    await text(outage,"Unavailable");
-    const mobile=await browser.newPage({viewport:{width:390,height:844}});
+    await text(outage,"不可用");
+    const mobile=await browser.newPage({locale:"zh-CN",viewport:{width:390,height:844}});
     await mobile.goto(base+"/console");
     await signIn(mobile);
-    await text(mobile,"Ready");
+    await text(mobile,"已就绪");
     assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
     assert.deepEqual(faults,[]);
     console.log("PASS: browser workflow, authorization, repeat click, HTTP reply loss, refresh recovery, stale and expired plans, dependency outage, mobile layout");

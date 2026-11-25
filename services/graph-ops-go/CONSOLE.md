@@ -1,5 +1,9 @@
 # Graph Operations Console
 
+## 中文操作速览
+
+软件界面名称为「专业教学图谱数据管理与运行监测系统」。以隔离实验库启动 Go 服务后，在浏览器访问本机 `/console`。使用单独设置的管理员访问令牌登录，依次进入「数据导入」「同步预览」「操作历史」和「运行监测」。建议用 `testdata/console.csv` 演示。操作历史只显示 Neo4j 已提交记录，运行统计按本进程累计。发生回执不确定时，在「同步预览」下方以原操作查询键查结果。
+
 ## Run the isolated lab
 
 Start a fresh lab and provision its synthetic schema as described in README. Use a loopback Bolt URL with a non-default port, a fresh lab marker, a separate plan key and a distinct administrator token. Each secret is 32 bytes represented as 64 hex characters. Enter the administrator token in the local sign-in form. Keep all credentials in the local process environment or a controlled secret source.

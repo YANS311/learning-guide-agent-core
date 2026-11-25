@@ -1,83 +1,87 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Graph Operations Console</title>
+<title>专业教学图谱数据管理与运行监测系统</title>
 <link rel="stylesheet" href="/console/style.css">
 <script defer src="/console/app.js"></script>
 </head>
 <body>
 <main id="login-screen" class="signin">
   <form id="login-form" class="login-card">
-    <div class="brand"><span class="brand-mark">G</span> Graph Operations</div>
-    <h1>Administrator sign-in</h1>
-    <label for="access">Administrator token</label>
+    <div class="brand"><span class="brand-mark" aria-hidden="true">图</span><span>专业教学图谱数据管理<br>与运行监测系统</span></div>
+    <h1>管理员登录</h1>
+    <label for="access">管理员访问令牌</label>
     <input id="access" type="password" required autocomplete="off" spellcheck="false">
-    <button class="primary">Sign in</button>
+    <button class="primary">登录</button>
     <p id="login-error" class="error" role="alert"></p>
   </form>
 </main>
 <div id="workspace" class="shell" hidden>
   <aside class="sidebar">
-    <div class="brand"><span class="brand-mark">G</span> Graph Operations</div>
-    <nav aria-label="Console">
-      <button data-tab="overview" aria-current="page">Overview</button>
-      <button data-tab="import">Data import</button>
-      <button data-tab="sync">Sync preview</button>
-      <button data-tab="history">Operation history</button>
-      <button data-tab="monitor">Monitoring</button>
+    <div class="brand"><span class="brand-mark" aria-hidden="true">图</span><span>专业教学图谱数据管理<br>与运行监测系统</span></div>
+    <nav aria-label="管理导航">
+      <button data-tab="overview" aria-current="page">运行概览</button>
+      <button data-tab="import">数据导入</button>
+      <button data-tab="sync">同步预览</button>
+      <button data-tab="history">操作历史</button>
+      <button data-tab="monitor">运行监测</button>
     </nav>
-    <div class="sidebar-bottom"><span id="role"></span><button id="logout" class="quiet">Sign out</button></div>
+    <div class="sidebar-bottom"><span id="role"></span><button id="logout" class="quiet">退出登录</button></div>
   </aside>
   <main class="main">
-    <header class="top"><span class="badge">Synthetic lab</span><span id="session-label"></span></header>
+    <header class="top"><span class="badge">合成数据实验环境</span><span id="session-label"></span></header>
     <section id="panel-overview" class="panel">
-      <div class="heading"><div><h1>Operations overview</h1><p>Course and prerequisite graph</p></div><button data-refresh>Refresh</button></div>
+      <div class="heading"><div><h1>运行概览</h1><p>课程与先修关系图谱</p></div><button data-refresh>刷新</button></div>
       <div id="overview-health" class="health-grid"></div>
       <div id="overview-stats" class="metrics-grid"></div>
     </section>
     <section id="panel-import" class="panel" hidden>
-      <div class="heading"><div><h1>Data import</h1><p>Courses and directed PREREQ relations</p></div></div>
+      <div class="heading"><div><h1>数据导入</h1><p>课程数据与有向先修关系</p></div></div>
       <form id="import-form" class="band">
-        <label for="file">CSV or JSON file</label>
-        <input type="file" id="file" accept=".csv,.json" required>
-        <div class="actions"><button class="primary">Validate file</button></div>
+        <div class="field-label">导入文件（CSV / JSON）</div>
+        <div class="file-picker">
+          <input type="file" id="file" class="visually-hidden" accept=".csv,.json" required>
+          <label for="file" class="file-button">选择文件</label>
+          <span id="file-name">尚未选择文件</span>
+        </div>
+        <div class="actions"><button class="primary">校验文件</button></div>
       </form>
-      <details class="band"><summary>Input format</summary>
-        <p>JSON fields: <code>courses</code> and <code>relations</code>. Courses require <code>id</code> and <code>name</code>. Relations require <code>type</code>, <code>source</code> and <code>target</code>.</p>
-        <p>CSV columns: <code>kind,id,name,category,semester,credits,hours,layer,description,type,source,target,reason,strength</code></p>
+      <details class="band"><summary>文件字段规范</summary>
+        <p>JSON 包含 <code>courses</code>（课程）和 <code>relations</code>（关系）。课程必填 <code>id</code>（编号）和 <code>name</code>（名称）。关系必填 <code>type</code>（类型）、<code>source</code>（先修课程）和 <code>target</code>（目标课程）。</p>
+        <p>CSV 表头： <code>kind,id,name,category,semester,credits,hours,layer,description,type,source,target,reason,strength</code></p>
       </details>
       <div id="import-result" role="status"></div>
     </section>
     <section id="panel-sync" class="panel" hidden>
-      <div class="heading"><div><h1>Sync preview</h1><p>Incremental updates to the synthetic graph</p></div></div>
+      <div class="heading"><div><h1>同步预览</h1><p>课程及先修关系的增量变更</p></div></div>
       <form id="preview-form" class="band">
-        <label for="scope">Managed course IDs</label>
+        <label for="scope">管理范围（课程编号）</label>
         <input id="scope" placeholder="LAB-EXAMPLE-A, LAB-EXAMPLE-B" required>
-        <div class="actions"><button class="primary" id="preview-btn">Build preview</button></div>
+        <div class="actions"><button class="primary" id="preview-btn">生成预览</button></div>
       </form>
       <div id="preview-result" role="status"></div>
       <div id="confirm" class="actions" hidden>
-        <label class="check"><input id="confirmed" type="checkbox"> Confirm these incremental changes</label>
-        <button id="execute" class="primary" disabled>Execute sync</button>
+        <label class="check"><input id="confirmed" type="checkbox"> 我已核对并确认本次增量变更</label>
+        <button id="execute" class="primary" disabled>执行同步</button>
       </div>
       <div id="execution-result" role="status"></div>
       <form id="recovery" class="band">
-        <h2>Confirm an operation</h2>
-        <label for="operation-key">Idempotency key</label>
+        <h2>查询同步结果</h2>
+        <label for="operation-key">操作查询键</label>
         <input id="operation-key" minlength="16" maxlength="128" required spellcheck="false">
-        <div class="actions"><button id="lookup">Check outcome</button><button id="retry" type="button" hidden>Retry same operation</button></div>
+        <div class="actions"><button id="lookup">查询结果</button><button id="retry" type="button" hidden>用原请求重试</button></div>
         <div id="lookup-result" role="status"></div>
       </form>
     </section>
     <section id="panel-history" class="panel" hidden>
-      <div class="heading"><div><h1>Operation history</h1><p>Committed Neo4j records</p></div><button id="history-refresh">Refresh</button></div>
-      <div id="history-result"></div><div class="actions"><button id="next" hidden>Next page</button></div>
+      <div class="heading"><div><h1>操作历史</h1><p>仅显示已提交的数据库操作</p></div><button id="history-refresh">刷新</button></div>
+      <div id="history-result"></div><div class="actions"><button id="next" hidden>下一页</button></div>
       <div id="detail-result" role="status"></div>
     </section>
     <section id="panel-monitor" class="panel" hidden>
-      <div class="heading"><div><h1>Runtime monitoring</h1><p id="metric-since">Counters since process start</p></div><button data-refresh>Refresh</button></div>
+      <div class="heading"><div><h1>运行监测</h1><p id="metric-since">统计口径：本次服务启动以来</p></div><button data-refresh>刷新</button></div>
       <div id="monitor-health" class="health-grid"></div><div id="monitor-table"></div>
     </section>
     <p id="notice" role="status" aria-live="polite"></p>

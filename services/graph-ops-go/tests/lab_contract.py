@@ -6,6 +6,7 @@ import socket
 import subprocess
 import sys
 import time
+from uuid import uuid4
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -19,13 +20,13 @@ def server(binary, env):
     try:
         session = ""
 
-        def call(path, data=None, key=None):
+        def call(path, data=None, key=None, method=None):
             headers = {"Content-Type": "application/json"}
             if session:
                 headers["Authorization"] = "Bearer " + session
             if key is not None:
                 headers["Idempotency-Key"] = key
-            req = Request("http://" + addr + path, None if data is None else json.dumps(data).encode(), headers)
+            req = Request("http://" + addr + path, None if data is None else json.dumps(data).encode(), headers, method=method)
             try:
                 response = urlopen(req, timeout=8)
             except HTTPError as error:
@@ -45,7 +46,9 @@ def server(binary, env):
                 time.sleep(0.1)
         else:
             raise RuntimeError("Go server did not start")
-        assert call("/api/v1/graph/db/execute", {})[0] == 401
+        # Authentication precedes body parsing. Use an empty POST so this probe
+        # does not depend on platform behavior when a denied body is unread.
+        assert call("/api/v1/graph/db/execute", method="POST")[0] == 401
         status, result = call("/api/v1/admin/login", {"token": env["GRAPHOPS_ADMIN_TOKEN"]})
         assert status == 200
         session = result["session"]
@@ -57,14 +60,16 @@ def server(binary, env):
 
 def main(binary):
     root = "/api/v1/graph/db/"
-    target = {"courses": [{"id": "LAB-HTTP", "name": "Synthetic HTTP contract"}], "relations": []}
-    key = "synthetic-http-contract"
+    suffix = uuid4().hex[:12]
+    course_id = "LAB-HTTP-" + suffix
+    target = {"courses": [{"id": course_id, "name": "Synthetic HTTP contract " + suffix}], "relations": []}
+    key = "synthetic-http-contract-" + suffix
     with server(binary, os.environ.copy()) as call:
         status, health = call("/health/ready")
         assert status == 200 and health["snapshot_source"] == "neo4j" and health["database_connected"]
         status, original = call("/api/v1/graph/sync/preview", {"current": {}, "target": {}})
         assert status == 200 and original["executable"]
-        status, preview = call(root + "preview", {"scope": {"course_ids": ["LAB-HTTP"]}, "target": target})
+        status, preview = call(root + "preview", {"scope": {"course_ids": [course_id]}, "target": target})
         assert status == 200 and preview["plan"]["statistics"]["courses"]["added"] == 1
         command = {"plan_token": preview["plan_token"], "target": target}
         status, result = call(root + "execute", command, key)
