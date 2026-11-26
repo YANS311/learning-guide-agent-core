@@ -1,0 +1,6 @@
+global:
+  scrape_interval: 10s
+scrape_configs:
+  - job_name: advisor
+    static_configs:
+      - targets: ["127.0.0.1:8095", "127.0.0.1:8096"]

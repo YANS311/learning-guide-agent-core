@@ -41,8 +41,10 @@ CREATE TABLE plan_version(plan_id TEXT NOT NULL, version INTEGER NOT NULL, run T
 `
 
 type Store struct {
-	db    *sql.DB
-	guard *flock.Flock
+	db          *sql.DB
+	guard       *flock.Flock
+	distributed bool
+	lease       time.Duration
 }
 
 func OpenStore(name string) (*Store, error) {
@@ -132,7 +134,7 @@ func OpenStore(name string) (*Store, error) {
 	if _, err = db.Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL"); err != nil {
 		return nil, err
 	}
-	s := &Store{db, lock}
+	s := &Store{db: db, guard: lock}
 	if err = s.recover(); err != nil {
 		return nil, err
 	}
@@ -140,8 +142,14 @@ func OpenStore(name string) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) Close() error { return errors.Join(s.db.Close(), s.guard.Close()) }
-func now() string             { return time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z") }
+func (s *Store) Close() error {
+	err := s.db.Close()
+	if s.guard != nil {
+		return errors.Join(err, s.guard.Close())
+	}
+	return err
+}
+func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z") }
 
 func randomID(size int) (string, error) {
 	b := make([]byte, size)
@@ -157,7 +165,13 @@ func digest(b []byte) string {
 }
 
 func txDo(ctx context.Context, s *Store, f func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	var opts *sql.TxOptions
+	if s.distributed {
+		opts = &sql.TxOptions{Isolation: sql.LevelReadCommitted}
+	}
+	tx, err := s.db.BeginTx(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -228,10 +242,16 @@ func (s *Store) SaveProfile(ctx context.Context, owner string, p Profile) (Profi
 		args := []any{p.Revision, string(raw), owner, prior}
 		if prior == 0 {
 			q = "INSERT OR IGNORE INTO profile(owner,revision,body) VALUES(?,?,?)"
+			if s.distributed {
+				q = "INSERT INTO profile(owner,revision,body) VALUES(?,?,?)"
+			}
 			args = []any{owner, p.Revision, string(raw)}
 		}
 		res, err := tx.Exec(q, args...)
 		if err != nil {
+			if prior == 0 && duplicateKey(err) {
+				return Revision
+			}
 			return err
 		}
 		if n, _ := res.RowsAffected(); n != 1 {
@@ -279,8 +299,14 @@ func (s *Store) Enqueue(ctx context.Context, owner, key string, r Request) (Run,
 	hash := digest(req)
 	var replay bool
 	err = txDo(ctx, s, func(tx *sql.Tx) error {
+		if s.distributed {
+			var id int
+			if err := tx.QueryRow("SELECT id FROM admission WHERE id=1 FOR UPDATE").Scan(&id); err != nil {
+				return err
+			}
+		}
 		var old string
-		err := tx.QueryRow("SELECT id,digest FROM run WHERE owner=? AND key=?", owner, key).Scan(&out.ID, &old)
+		err := tx.QueryRow("SELECT id,digest FROM run WHERE owner=? AND "+s.keyColumn()+"=?", owner, key).Scan(&out.ID, &old)
 		if err == nil {
 			if old != hash {
 				return Idempotency
@@ -293,7 +319,7 @@ func (s *Store) Enqueue(ctx context.Context, owner, key string, r Request) (Run,
 		}
 		var body string
 		var revision int
-		err = tx.QueryRow("SELECT revision,body FROM profile WHERE owner=?", owner).Scan(&revision, &body)
+		err = tx.QueryRow("SELECT revision,body FROM profile WHERE owner=?"+s.lockSuffix(), owner).Scan(&revision, &body)
 		if errors.Is(err, sql.ErrNoRows) {
 			return Revision
 		}
@@ -338,7 +364,7 @@ func (s *Store) Enqueue(ctx context.Context, owner, key string, r Request) (Run,
 			}
 			out.Version++
 		}
-		_, err = tx.Exec(`INSERT INTO run(id,owner,key,digest,profile,request,state,plan_id,version,created)
+		_, err = tx.Exec(`INSERT INTO run(id,owner,`+s.keyColumn()+`,digest,profile,request,state,plan_id,version,created)
 			VALUES(?,?,?,?,?,?,?,?,?,?)`, out.ID, owner, key, hash, body, string(req), out.State, out.PlanID, out.Version, out.Created)
 		if err != nil {
 			return err
@@ -355,16 +381,29 @@ func (s *Store) Enqueue(ctx context.Context, owner, key string, r Request) (Run,
 }
 
 type work struct {
-	ID string
-	R  Request
-	P  Profile
+	ID      string
+	R       Request
+	P       Profile
+	Attempt int
+	Worker  string
+	Created string
 }
 
-func (s *Store) Claim(ctx context.Context) (work, error) {
+func (s *Store) Claim(ctx context.Context, worker ...string) (work, error) {
 	var w work
 	err := txDo(ctx, s, func(tx *sql.Tx) error {
 		var request, profile string
-		err := tx.QueryRow("SELECT id,request,profile FROM run WHERE state='QUEUED' ORDER BY created,id LIMIT 1").Scan(&w.ID, &request, &profile)
+		var err error
+		if s.distributed {
+			if len(worker) != 1 || !idRE.MatchString(worker[0]) || len(worker[0]) > 32 {
+				return Invalid
+			}
+			w.Worker = worker[0]
+			err = tx.QueryRow(`SELECT id,request,profile,attempt,created FROM run WHERE state='QUEUED' AND available<=UTC_TIMESTAMP(6)
+				ORDER BY available,created,id LIMIT 1 FOR UPDATE SKIP LOCKED`).Scan(&w.ID, &request, &profile, &w.Attempt, &w.Created)
+		} else {
+			err = tx.QueryRow("SELECT id,request,profile,created FROM run WHERE state='QUEUED' ORDER BY created,id LIMIT 1").Scan(&w.ID, &request, &profile, &w.Created)
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return Missing
 		}
@@ -377,7 +416,15 @@ func (s *Store) Claim(ctx context.Context) (work, error) {
 		if err = json.Unmarshal([]byte(profile), &w.P); err != nil {
 			return err
 		}
-		if _, err = tx.Exec("UPDATE run SET state='RUNNING' WHERE id=? AND state='QUEUED'", w.ID); err != nil {
+		if s.distributed {
+			w.Attempt++
+			_, err = tx.Exec(`UPDATE run SET state='RUNNING', attempt=?, worker=?, heartbeat=UTC_TIMESTAMP(6),
+				lease_deadline=TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6)) WHERE id=? AND state='QUEUED'`,
+				w.Attempt, w.Worker, s.lease.Microseconds(), w.ID)
+		} else {
+			_, err = tx.Exec("UPDATE run SET state='RUNNING' WHERE id=? AND state='QUEUED'", w.ID)
+		}
+		if err != nil {
 			return err
 		}
 		return addEvent(tx, w.ID, "run_started")
@@ -385,8 +432,17 @@ func (s *Store) Claim(ctx context.Context) (work, error) {
 	return w, err
 }
 
-func (s *Store) Progress(ctx context.Context, id, kind string) error {
+func (s *Store) Progress(ctx context.Context, id, kind string, claim ...work) error {
 	return txDo(ctx, s, func(tx *sql.Tx) error {
+		if s.distributed {
+			if len(claim) != 1 || claim[0].ID != id {
+				return LostLease
+			}
+			if err := validLease(tx, claim[0]); err != nil {
+				return err
+			}
+			return addEvent(tx, id, kind)
+		}
 		var state string
 		if err := tx.QueryRow("SELECT state FROM run WHERE id=?", id).Scan(&state); err != nil {
 			return err
@@ -398,18 +454,28 @@ func (s *Store) Progress(ctx context.Context, id, kind string) error {
 	})
 }
 
-func (s *Store) Finish(ctx context.Context, id, code string, plan *Plan) error {
+func (s *Store) Finish(ctx context.Context, id, code string, plan *Plan, claim ...work) error {
 	return txDo(ctx, s, func(tx *sql.Tx) error {
 		state, kind := "FAILED", "failed"
 		if plan != nil {
 			state, kind = "SUCCEEDED", "completed"
 		}
-		res, err := tx.Exec("UPDATE run SET state=?,error=? WHERE id=? AND state='RUNNING'", state, code, id)
+		q := "UPDATE run SET state=?,error=? WHERE id=? AND state='RUNNING'"
+		if s.distributed {
+			if len(claim) != 1 || claim[0].ID != id {
+				return LostLease
+			}
+			if err := validLease(tx, claim[0]); err != nil {
+				return err
+			}
+			q = "UPDATE run SET state=?,error=?,finished=UTC_TIMESTAMP(6),lease_deadline=NULL WHERE id=? AND state='RUNNING'"
+		}
+		res, err := tx.Exec(q, state, code, id)
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			return nil
+			return LostLease
 		}
 		if plan != nil {
 			raw, err := json.Marshal(plan)
@@ -431,7 +497,7 @@ func (s *Store) Finish(ctx context.Context, id, code string, plan *Plan) error {
 func (s *Store) Cancel(ctx context.Context, owner, id string) error {
 	return txDo(ctx, s, func(tx *sql.Tx) error {
 		var state string
-		err := tx.QueryRow("SELECT state FROM run WHERE id=? AND owner=?", id, owner).Scan(&state)
+		err := tx.QueryRow("SELECT state FROM run WHERE id=? AND owner=?"+s.lockSuffix(), id, owner).Scan(&state)
 		if errors.Is(err, sql.ErrNoRows) {
 			return Missing
 		}
@@ -444,7 +510,11 @@ func (s *Store) Cancel(ctx context.Context, owner, id string) error {
 		if state != "QUEUED" && state != "RUNNING" {
 			return Revision
 		}
-		if _, err = tx.Exec("UPDATE run SET state='CANCELLED' WHERE id=?", id); err != nil {
+		q := "UPDATE run SET state='CANCELLED' WHERE id=?"
+		if s.distributed {
+			q = "UPDATE run SET state='CANCELLED',finished=UTC_TIMESTAMP(6),lease_deadline=NULL WHERE id=?"
+		}
+		if _, err = tx.Exec(q, id); err != nil {
 			return err
 		}
 		return addEvent(tx, id, "cancelled")
@@ -486,15 +556,24 @@ func scanRun(row interface{ Scan(...any) error }) (Run, error) {
 	return out, err
 }
 
-const selectRun = `SELECT r.id,r.plan_id,r.version,r.state,r.created,r.error,r.request,v.body
-	FROM run r LEFT JOIN plan_version v ON v.run=r.id`
+const runFields = "SELECT r.id,r.plan_id,r.version,r.state,r.created,r.error,r.request,v.body "
+const selectRun = runFields + "FROM run r LEFT JOIN plan_version v ON v.run=r.id"
+const mysqlHistory = runFields + `FROM (
+	SELECT id FROM run FORCE INDEX (run_history) WHERE owner=?
+	ORDER BY created DESC,id DESC LIMIT ? OFFSET ?
+) AS window_ids JOIN run r ON r.id=window_ids.id
+LEFT JOIN plan_version v ON v.run=r.id ORDER BY r.created DESC,r.id DESC`
 
 func (s *Store) Run(ctx context.Context, owner, id string) (Run, error) {
 	return scanRun(s.db.QueryRowContext(ctx, selectRun+" WHERE r.owner=? AND r.id=?", owner, id))
 }
 
 func (s *Store) History(ctx context.Context, owner string, offset, limit int) ([]Run, error) {
-	rows, err := s.db.QueryContext(ctx, selectRun+" WHERE r.owner=? ORDER BY r.created DESC,r.id DESC LIMIT ? OFFSET ?", owner, limit, offset)
+	q := selectRun + " WHERE r.owner=? ORDER BY r.created DESC,r.id DESC LIMIT ? OFFSET ?"
+	if s.distributed {
+		q = mysqlHistory
+	}
+	rows, err := s.db.QueryContext(ctx, q, owner, limit, offset)
 	if err != nil {
 		return nil, err
 	}

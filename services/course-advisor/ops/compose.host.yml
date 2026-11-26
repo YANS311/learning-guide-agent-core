@@ -1,0 +1,6 @@
+# Explicit opt-in for isolated native integration tests.
+services:
+  mysql:
+    ports: ["127.0.0.1:23306:3306"]
+  redis:
+    ports: ["127.0.0.1:26379:6379"]

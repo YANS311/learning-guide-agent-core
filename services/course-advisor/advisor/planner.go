@@ -22,6 +22,7 @@ type Planner struct {
 	Evidence         EvidenceSource
 	Narrator         Narrator
 	EvidenceSnapshot string
+	RequiredSnapshot string
 }
 
 func score(c Course, terms ...string) int {
@@ -59,6 +60,9 @@ func (p Planner) Run(ctx context.Context, profile Profile, req Request, progress
 	}
 	if !shaRE.MatchString(catalog.Version) {
 		return plan, Dependency
+	}
+	if p.RequiredSnapshot != "" && p.RequiredSnapshot != catalog.Version {
+		return plan, Changed
 	}
 	plan.SnapshotVersion = catalog.Version
 	if p.Evidence != nil && (p.EvidenceSnapshot == "" || p.EvidenceSnapshot == catalog.Version) {
@@ -132,7 +136,15 @@ func (p Planner) Run(ctx context.Context, profile Profile, req Request, progress
 		case plan.ToolCalls > MaxCandidates:
 			item.Outcome = "NOT_CHECKED"
 		default:
-			proof, failure := p.Graph.Check(ctx, c.ID)
+			var proof CourseCheck
+			var failure error
+			if versioned, ok := p.Graph.(interface {
+				CheckVersion(context.Context, string, string) (CourseCheck, error)
+			}); ok {
+				proof, failure = versioned.CheckVersion(ctx, c.ID, catalog.Version)
+			} else {
+				proof, failure = p.Graph.Check(ctx, c.ID)
+			}
 			plan.ToolCalls++
 			if failure != nil {
 				return plan, failure
@@ -171,6 +183,18 @@ func (p Planner) Run(ctx context.Context, profile Profile, req Request, progress
 			}
 		}
 		plan.Candidates = append(plan.Candidates, item)
+	}
+	if _, ok := p.Graph.(interface {
+		CheckVersion(context.Context, string, string) (CourseCheck, error)
+	}); ok {
+		current, err := p.Graph.Catalog(ctx)
+		plan.ToolCalls++
+		if err != nil {
+			return plan, err
+		}
+		if current.Version != catalog.Version {
+			return plan, Changed
+		}
 	}
 	if err := progress("constraints_checked"); err != nil {
 		return plan, err

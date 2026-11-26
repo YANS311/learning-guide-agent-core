@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"learning-guide/course-advisor/advisor"
@@ -31,6 +32,8 @@ func main() {
 func run() error {
 	port := flag.Int("port", 8095, "loopback HTTP port")
 	database := flag.String("db", "", "dedicated course-advisor.sqlite3")
+	mysqlLab := flag.Bool("mysql-lab", false, "use the synthetic MySQL lab")
+	redisLab := flag.Bool("redis-lab", false, "use isolated Redis for caching and rate limiting")
 	prereq := flag.String("prereq", "", "Phase 4 loopback URL")
 	documents := flag.String("evidence", "", "versioned local evidence JSON")
 	sampleEvidence := flag.Bool("sample-evidence", false, "enable embedded evidence for the matching synthetic snapshot")
@@ -38,11 +41,11 @@ func run() error {
 	modelURL := flag.String("ollama", "", "optional local explanation Ollama URL")
 	model := flag.String("model", "", "local Ollama model identifier")
 	flag.Parse()
-	if *port < 1024 || *port > 65535 || *database == "" || *prereq == "" || (*modelURL == "") != (*model == "") ||
-		(*sampleEvidence && *documents != "") {
-		return errors.New("require dedicated --db and --prereq; optional --ollama requires --model")
+	if *port < 1024 || *port > 65535 || (*database != "") == *mysqlLab || *prereq == "" || (*modelURL == "") != (*model == "") ||
+		(*sampleEvidence && *documents != "") || (*mysqlLab && (*modelURL != "" || *documents != "" || *rag != "")) {
+		return errors.New("choose exactly one of --db and --mysql-lab; isolated MySQL allows synthetic rules mode only")
 	}
-	graph, err := advisor.NewLocalHTTP(*prereq, 2*time.Second)
+	upstream, err := advisor.NewLocalHTTP(*prereq, 2*time.Second)
 	if err != nil {
 		return err
 	}
@@ -52,6 +55,26 @@ func run() error {
 		if err != nil {
 			return err
 		}
+	}
+	metrics := new(advisor.Metrics)
+	upstream.Observe(metrics)
+	if remote != nil {
+		remote.Observe(metrics)
+	}
+	var graph advisor.Graph = upstream
+	const synthetic = "29cee747e9d778dd784c1f26aece1b44551a1df72c94e4a4ff9c3194f579aa42"
+	if *mysqlLab {
+		graph = advisor.SnapshotGuard{Graph: graph, Required: synthetic}
+	}
+	var limiter *advisor.RedisLab
+	marker := os.Getenv("ADVISOR_LAB_MARKER")
+	if *redisLab {
+		limiter, err = advisor.NewRedisLab(os.Getenv("ADVISOR_REDIS_ADDR"), os.Getenv("ADVISOR_REDIS_PASSWORD"), marker, metrics)
+		if err != nil {
+			return err
+		}
+		defer limiter.Close()
+		graph = &advisor.CachedGraph{Graph: graph, Cache: limiter}
 	}
 	var narrator advisor.Narrator
 	if *modelURL != "" {
@@ -69,9 +92,12 @@ func run() error {
 	if err = json.Unmarshal(data, &sample); err != nil {
 		return err
 	}
-	var evidenceSnapshot string
+	var evidenceSnapshot, requiredSnapshot string
+	if *mysqlLab {
+		requiredSnapshot = synthetic
+	}
 	if *sampleEvidence {
-		evidenceSnapshot = "29cee747e9d778dd784c1f26aece1b44551a1df72c94e4a4ff9c3194f579aa42"
+		evidenceSnapshot = synthetic
 	} else {
 		sample = nil
 	}
@@ -79,15 +105,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	store, err := advisor.OpenStore(*database)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	var store *advisor.Store
+	if *mysqlLab {
+		boot, cancel := context.WithTimeout(ctx, 12*time.Second)
+		defer cancel()
+		store, err = advisor.OpenMySQL(boot, os.Getenv("ADVISOR_MYSQL_DSN"), marker)
+	} else {
+		store, err = advisor.OpenStore(*database)
+	}
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	worker := &advisor.Worker{Store: store, Timeout: 24 * time.Second, Planner: advisor.Planner{Graph: graph,
-		Evidence: advisor.RetrievalAdapter{Remote: remote, Fallback: corpus}, Narrator: narrator, EvidenceSnapshot: evidenceSnapshot}}
+	worker := &advisor.Worker{Store: store, Metrics: metrics, Timeout: 24 * time.Second, Planner: advisor.Planner{Graph: graph,
+		Evidence: advisor.RetrievalAdapter{Remote: remote, Fallback: corpus}, Narrator: narrator,
+		EvidenceSnapshot: evidenceSnapshot, RequiredSnapshot: requiredSnapshot}}
 	halt, err := worker.Start(ctx)
 	if err != nil {
 		return err
@@ -97,18 +131,27 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	api := advisor.API{Store: store, Worker: worker, Graph: graph, Assets: http.FileServer(http.FS(web))}
+	api := advisor.API{Store: store, Worker: worker, Graph: graph, Assets: http.FileServer(http.FS(web)), Metrics: metrics}
+	if limiter != nil {
+		api.Limiter = limiter
+	}
 	addr := "127.0.0.1:" + strconv.Itoa(*port)
 	server := &http.Server{Addr: addr, Handler: api.Handler(), ReadHeaderTimeout: 4 * time.Second,
 		ReadTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 * 1024}
+	closed := make(chan struct{})
 	go func() {
+		defer close(closed)
 		<-ctx.Done()
 		timeout, release := context.WithTimeout(context.Background(), 5*time.Second)
 		defer release()
-		_ = server.Shutdown(timeout)
+		if err := server.Shutdown(timeout); err != nil {
+			_ = server.Close()
+		}
 	}()
 	slog.Info("advisor listening", "url", fmt.Sprintf("http://%s", addr))
 	err = server.ListenAndServe()
+	stop()
+	<-closed
 	if !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

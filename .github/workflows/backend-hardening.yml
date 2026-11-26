@@ -1,0 +1,74 @@
+name: Backend Hardening
+
+on:
+  push:
+    branches: ["feature/backend-hardening-final"]
+  pull_request:
+    branches: [main]
+    paths:
+      - "services/course-advisor/**"
+      - ".github/workflows/backend-hardening.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: services/course-advisor
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: services/course-advisor/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Format, vet, SQLite race tests and build
+        run: |
+          test -z "$(gofmt -l advisor main.go)"
+          go vet ./...
+          go test -race -count=1 ./...
+          go build -o "$RUNNER_TEMP/course-advisor" .
+      - name: Python dependencies and Chromium
+        run: |
+          python -m pip install -r rag/requirements.txt -r ../prerequisite-analysis/requirements.txt
+          python -m unittest discover -s rag -p 'test_*.py'
+          npm install --prefix "$RUNNER_TEMP/p6-browser" --no-audit --no-fund playwright@1.65.1
+          "$RUNNER_TEMP/p6-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Check reachable Go vulnerabilities
+        run: |
+          docker run --rm --mount "type=bind,source=$PWD,target=/work,readonly" --workdir /work golang:1.26-alpine \
+            sh -ec 'go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...'
+      - name: Actual MySQL, Redis, two instances and Nginx browser
+        run: |
+          set -euo pipefail
+          file="$RUNNER_TEMP/phase6.env"
+          umask 077
+          for key in ADVISOR_MYSQL_ROOT_PASSWORD ADVISOR_MYSQL_PASSWORD ADVISOR_REDIS_PASSWORD ADVISOR_LAB_MARKER; do
+            value="$(openssl rand -hex 32)"
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$file"
+            export "$key=$value"
+          done
+          export ADVISOR_MYSQL_DSN="advisor_lab:$ADVISOR_MYSQL_PASSWORD@tcp(127.0.0.1:23306)/advisor_phase6_lab"
+          export ADVISOR_REDIS_ADDR=127.0.0.1:26379
+          export ADVISOR_INDEX_REPORT="$RUNNER_TEMP/mysql-index.json"
+          export NODE_PATH="$RUNNER_TEMP/p6-browser/node_modules"
+          compose() { docker compose -p advisor-phase6-ci --env-file "$file" -f ops/compose.yml -f ops/compose.host.yml "$@"; }
+          trap 'compose down --volumes' EXIT
+          compose up -d --wait mysql redis
+          go test -race -count=1 -v ./advisor -run 'TestMySQL|TestRedis'
+          node tests/multinode.cjs "$RUNNER_TEMP/course-advisor" python
+          node tests/browser.cjs "$RUNNER_TEMP/course-advisor" python
+          compose up -d --wait --build
+          node tests/proxy.cjs http://127.0.0.1:18095

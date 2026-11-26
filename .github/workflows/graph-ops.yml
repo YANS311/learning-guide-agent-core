@@ -2,7 +2,7 @@ name: Graph Ops CI
 
 on:
   push:
-    branches: [main, master, "feature/go-graph-ops-phase1", "feature/go-graph-ops-phase2", "feature/go-graph-ops-phase3"]
+    branches: [main, master, "feature/go-graph-ops-phase1", "feature/go-graph-ops-phase2", "feature/go-graph-ops-phase3", "feature/backend-hardening-final"]
     paths: ["services/graph-ops-go/**", ".github/workflows/graph-ops.yml", ".github/workflows/ci.yml"]
   pull_request:
     branches: [main, master]

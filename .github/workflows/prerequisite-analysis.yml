@@ -2,7 +2,7 @@ name: Prerequisite Analysis
 
 on:
   push:
-    branches: ["feature/prerequisite-analysis-phase4", "feature/course-advisor-phase5"]
+    branches: ["feature/prerequisite-analysis-phase4", "feature/course-advisor-phase5", "feature/backend-hardening-final"]
   pull_request:
     branches: [main]
     paths:

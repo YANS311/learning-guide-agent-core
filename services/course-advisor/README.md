@@ -4,7 +4,7 @@ Go 负责候选排序、约束核验、SQLite 业务状态、异步任务、SSE 
 
 ## 运行
 
-在相邻的 `prerequisite-analysis` 目录按其说明启动服务（例如端口 8094）。从本目录用 Go 1.23 或兼容版本执行：
+在相邻的 `prerequisite-analysis` 目录按其说明启动服务（例如端口 8094）。从本目录用 Go 1.25 或兼容版本执行：
 
 ```sh
 go run . --db ./local/course-advisor.sqlite3 --prereq http://127.0.0.1:8094 --sample-evidence
@@ -37,3 +37,17 @@ node tests/browser.cjs /tmp/course-advisor python
 ```
 
 浏览器测试需要 Playwright Chromium 与 Phase 4 Python 依赖；自动启动独立合成课程服务及临时真实 SQLite 数据库。Go 服务无需接入 Redis、MySQL、Docker 或任意真实教学库。
+
+## Phase 6 合成联调
+
+SQLite 模式与上文相同。MySQL 模式仅限隔离 MySQL 8.4 库 `advisor_phase6_lab`，要求专用账户及预置身份标记，只允许我们的合成快照；拒绝未知库，且不启用 Python RAG 或模型自动重试。Redis 在可选联调模式中缓存带版本和完整性校验的必需先修结果；数据库仍是任务和幂等事实源。缓存异常回读只读来源；Redis 限流不可用时，新任务提交返回 503，历史和 SSE 不依赖 Redis。
+
+在 `ops/.env.example` 所列变量中填写四个**新生成的随机 64 位十六进制字符串**（例如 `openssl rand -hex 32`），保存在源码树外的私有环境文件。不要把已有数据库密码复制进来。从当前目录运行：
+
+```sh
+docker compose --env-file /path/to/private-lab.env -f ops/compose.yml up -d --build --wait
+```
+
+本机访问 `http://127.0.0.1:18095/`。Nginx 从 A/B 读取且不缓冲 SSE，未配置生产级故障转移；MySQL/Redis 默认不对宿主机开放。为原生联调可额外添加 `-f ops/compose.host.yml`，仅开放两个非默认回环测试端口。通过相同配置执行 `down` 停止，保留数据库卷；仅在确认丢弃合成库时执行 `down --volumes`。可选 `--profile metrics` 启动内部 Prometheus 抓取；`/metrics` 内容为实际计数，不包含学生或任务维度。
+
+MySQL 队列支持两个实例竞争、数据库时钟租约、心跳、最多三次领取与旧者防写。可安全重复的读链在工作进程丢失后可能再次执行，数据库最多提交一次有效结果；不承诺外部请求 exactly once。Redis 不保管队列、任务结果或 SSE 事件。跨实例事件由数据库重放，设置连接上限与写截止，不是逐 Token 流。

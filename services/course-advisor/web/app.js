@@ -7,11 +7,13 @@ const names={not_authenticated:"工作区未认证",not_found:"没有该记录",
   unknown_course:"课程编号不在当前目录中",snapshot_changed:"课程快照已变化，请重新生成",
   prerequisites_unavailable:"先修分析服务暂不可用",catalog_too_large:"课程目录超出本次分析范围",
   run_timeout:"任务已超时",service_restarted:"服务重启，任务已中断，可重新发起",
-  persistence_failed:"结果保存失败",internal_error:"服务暂时无法完成操作"};
+  persistence_failed:"结果保存失败",internal_error:"服务暂时无法完成操作",
+  rate_limiter_unavailable:"提交保护暂不可用，请稍后重试",lease_attempts_exhausted:"任务恢复次数已用尽，可重新提交",
+  storage_unavailable:"业务存储暂不可用，请保留原请求后重试"};
 const statusName={QUEUED:"等待执行",RUNNING:"正在分析",SUCCEEDED:"分析已完成",FAILED:"执行失败",CANCELLED:"已取消",
   INTERRUPTED:"已中断",REVIEW_REQUIRED:"方案待确认",UNKNOWN:"条件不足",NO_FEASIBLE_SELECTION:"本次未找到符合条件的课程"};
 const stage={queued:"已接收",run_started:"开始执行",retrieval_completed:"证据检索完成",constraints_checked:"先修及约束已核对",
-  plan_generated:"方案已生成",completed:"结果已保存",failed:"执行失败",cancelled:"已取消",interrupted:"已中断"};
+  plan_generated:"方案已生成",completed:"结果已保存",failed:"执行失败",cancelled:"已取消",interrupted:"已中断",requeued:"任务已重新排队"};
 const outcomes={SELECTED:"已纳入方案",ALREADY_COMPLETED:"已修课程",MISSING_REQUIRED:"缺少必需先修",
   CREDIT_LIMIT:"超过学分上限",UNKNOWN_CREDITS:"学分待确认",NOT_SELECTED_LIMIT:"超出推荐门数",
   NOT_CHECKED:"未纳入本次校验范围",USER_FILTER_MISMATCH:"不满足用户指定关键词"};

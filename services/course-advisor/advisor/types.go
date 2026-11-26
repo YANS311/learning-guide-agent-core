@@ -1,8 +1,11 @@
 package advisor
 
 import (
+	"context"
+	"database/sql/driver"
 	"errors"
 	"math"
+	"net"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -16,16 +19,19 @@ type Failure string
 func (f Failure) Error() string { return string(f) }
 
 const (
-	Invalid       Failure = "invalid_request"
-	Missing       Failure = "not_found"
-	Revision      Failure = "revision_conflict"
-	Busy          Failure = "queue_busy"
-	Idempotency   Failure = "idempotency_conflict"
-	Dependency    Failure = "prerequisites_unavailable"
-	Changed       Failure = "snapshot_changed"
-	CatalogSize   Failure = "catalog_too_large"
-	UnknownCourse Failure = "unknown_course"
-	Deadline      Failure = "run_timeout"
+	Invalid            Failure = "invalid_request"
+	Missing            Failure = "not_found"
+	Revision           Failure = "revision_conflict"
+	Busy               Failure = "queue_busy"
+	Idempotency        Failure = "idempotency_conflict"
+	Dependency         Failure = "prerequisites_unavailable"
+	Changed            Failure = "snapshot_changed"
+	CatalogSize        Failure = "catalog_too_large"
+	UnknownCourse      Failure = "unknown_course"
+	Deadline           Failure = "run_timeout"
+	LostLease          Failure = "lost_lease"
+	RateUnavailable    Failure = "rate_limiter_unavailable"
+	StorageUnavailable Failure = "storage_unavailable"
 )
 
 var idRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
@@ -152,6 +158,10 @@ func FailureCode(err error) string {
 	var f Failure
 	if errors.As(err, &f) {
 		return string(f)
+	}
+	var endpoint net.Error
+	if errors.Is(err, driver.ErrBadConn) || errors.Is(err, context.DeadlineExceeded) || errors.As(err, &endpoint) {
+		return string(StorageUnavailable)
 	}
 	return "internal_error"
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,8 +17,30 @@ import (
 )
 
 type LocalHTTP struct {
-	root   string
-	client *http.Client
+	root    string
+	client  *http.Client
+	metrics *Metrics
+}
+
+type SnapshotGuard struct {
+	Graph
+	Required string
+}
+
+func (g SnapshotGuard) Catalog(ctx context.Context) (Catalog, error) {
+	out, err := g.Graph.Catalog(ctx)
+	if err == nil && out.Version != g.Required {
+		return Catalog{}, Changed
+	}
+	return out, err
+}
+
+func (g SnapshotGuard) Check(ctx context.Context, id string) (CourseCheck, error) {
+	out, err := g.Graph.Check(ctx, id)
+	if err == nil && out.Version != g.Required {
+		return CourseCheck{}, Changed
+	}
+	return out, err
 }
 
 func NewLocalHTTP(base string, timeout time.Duration) (*LocalHTTP, error) {
@@ -27,36 +50,66 @@ func NewLocalHTTP(base string, timeout time.Duration) (*LocalHTTP, error) {
 		return nil, errors.New("expected an explicit IPv4 loopback HTTP port")
 	}
 	transport := &http.Transport{MaxConnsPerHost: 4, MaxIdleConnsPerHost: 2, IdleConnTimeout: 30 * time.Second}
-	return &LocalHTTP{strings.TrimSuffix(base, "/"), &http.Client{Transport: transport, Timeout: timeout,
+	return &LocalHTTP{root: strings.TrimSuffix(base, "/"), client: &http.Client{Transport: transport, Timeout: timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
-func (h *LocalHTTP) exchange(ctx context.Context, path string, in, out any) error {
+func (h *LocalHTTP) Observe(m *Metrics) { h.metrics = m }
+
+func (h *LocalHTTP) exchange(ctx context.Context, path string, in, out any) (err error) {
+	ctx, cancel := context.WithTimeout(ctx, h.client.Timeout)
+	defer cancel()
+	if h.metrics != nil {
+		h.metrics.dependencyRequests.Add(1)
+		defer func() {
+			if err != nil {
+				h.metrics.dependencyErrors.Add(1)
+			}
+		}()
+	}
+	id, _ := randomID(8)
+	retry, err := h.once(ctx, path, in, out, id)
+	if err == nil || !retry || in != nil {
+		return err
+	}
+	timer := time.NewTimer(time.Duration(24+rand.IntN(25)) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		_, err = h.once(ctx, path, in, out, id)
+		return err
+	}
+}
+
+func (h *LocalHTTP) once(ctx context.Context, path string, in, out any, id string) (bool, error) {
 	var body io.Reader
 	method := http.MethodGet
 	if in != nil {
 		payload, err := json.Marshal(in)
 		if err != nil {
-			return err
+			return false, err
 		}
 		method, body = http.MethodPost, bytes.NewReader(payload)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, h.root+path, body)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("X-Request-ID", id)
 	res, err := h.client.Do(req)
 	if err != nil {
-		return err
+		return ctx.Err() == nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return Dependency
+		return res.StatusCode == 502 || res.StatusCode == 503 || res.StatusCode == 504, Dependency
 	}
-	return decodeLimit(res.Body, out, 1024*1024)
+	return false, decodeLimit(res.Body, out, 1024*1024)
 }
 
 func decodeLimit(r io.Reader, out any, limit int64) error {

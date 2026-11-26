@@ -1,0 +1,98 @@
+name: advisor-phase6-lab
+
+x-advisor: &advisor
+  build:
+    context: ..
+    dockerfile: ops/advisor.Dockerfile
+  environment:
+    ADVISOR_LAB_MARKER: "${ADVISOR_LAB_MARKER:?generate a synthetic lab marker}"
+    ADVISOR_MYSQL_DSN: "advisor_lab:${ADVISOR_MYSQL_PASSWORD:?generate an isolated password}@tcp(mysql:3306)/advisor_phase6_lab"
+    ADVISOR_REDIS_ADDR: "redis:6379"
+    ADVISOR_REDIS_PASSWORD: "${ADVISOR_REDIS_PASSWORD:?generate an isolated password}"
+  network_mode: "service:prereq"
+  depends_on:
+    mysql: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    prereq: {condition: service_healthy}
+  mem_limit: 128m
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: "${ADVISOR_MYSQL_ROOT_PASSWORD:?generate an isolated password}"
+      MYSQL_DATABASE: "advisor_phase6_lab"
+      MYSQL_USER: "advisor_lab"
+      MYSQL_PASSWORD: "${ADVISOR_MYSQL_PASSWORD:?generate an isolated password}"
+      ADVISOR_LAB_MARKER: "${ADVISOR_LAB_MARKER:?generate a synthetic lab marker}"
+    command: ["--innodb-buffer-pool-size=128M", "--max-connections=72"]
+    volumes:
+      - mysql-lab:/var/lib/mysql
+      - ./init-mysql.sh:/docker-entrypoint-initdb.d/10-lab.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql -h 127.0.0.1 -u advisor_lab advisor_phase6_lab -e 'SELECT id FROM phase6_lab_identity WHERE id=1' >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 25
+    mem_limit: 800m
+  redis:
+    image: redis:7-alpine
+    environment:
+      ADVISOR_REDIS_PASSWORD: "${ADVISOR_REDIS_PASSWORD:?generate an isolated password}"
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$ADVISOR_REDIS_PASSWORD\" --save '' --appendonly no --maxmemory 32mb --maxmemory-policy noeviction"]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$ADVISOR_REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    mem_limit: 96m
+  prereq:
+    build:
+      context: ../..
+      dockerfile: course-advisor/ops/prereq.Dockerfile
+    ports: ["127.0.0.1:18095:8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8094/health/ready',timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 16
+    mem_limit: 192m
+  advisor-a:
+    <<: *advisor
+    command: ["--port", "8095", "--mysql-lab", "--redis-lab", "--prereq", "http://127.0.0.1:8094", "--sample-evidence"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8095/health/ready"]
+      interval: 3s
+      timeout: 3s
+      retries: 16
+  advisor-b:
+    <<: *advisor
+    command: ["--port", "8096", "--mysql-lab", "--redis-lab", "--prereq", "http://127.0.0.1:8094", "--sample-evidence"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8096/health/ready"]
+      interval: 3s
+      timeout: 3s
+      retries: 16
+  nginx:
+    image: nginx:1.28-alpine
+    network_mode: "service:prereq"
+    depends_on:
+      advisor-a: {condition: service_healthy}
+      advisor-b: {condition: service_healthy}
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    mem_limit: 64m
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["metrics"]
+    network_mode: "service:prereq"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    mem_limit: 192m
+volumes:
+  mysql-lab:
